@@ -32,6 +32,9 @@ var __importStar = (this && this.__importStar) || (function () {
         return result;
     };
 })();
+var __importDefault = (this && this.__importDefault) || function (mod) {
+    return (mod && mod.__esModule) ? mod : { "default": mod };
+};
 Object.defineProperty(exports, "__esModule", { value: true });
 const telegraf_1 = require("telegraf");
 const filters_1 = require("telegraf/filters");
@@ -39,6 +42,9 @@ const qrcode = __importStar(require("qrcode"));
 const fs = __importStar(require("fs"));
 const path = __importStar(require("path"));
 const dotenv_1 = require("dotenv");
+const sharp_1 = __importDefault(require("sharp"));
+const svg2png_1 = __importDefault(require("svg2png"));
+const axios_1 = __importDefault(require("axios"));
 // Загрузка переменных окружения
 (0, dotenv_1.config)();
 // Проверка наличия токена
@@ -47,24 +53,177 @@ if (!process.env.BOT_TOKEN) {
     console.error('Пожалуйста, создайте файл .env и добавьте в него BOT_TOKEN=your_token_here');
     process.exit(1);
 }
+// Хранилище состояний пользователей
+const userStates = new Map();
+// Функция для очистки папки temp
+function cleanupTempFolder() {
+    const tempDir = path.join(__dirname, 'temp');
+    if (fs.existsSync(tempDir)) {
+        const files = fs.readdirSync(tempDir);
+        for (const file of files) {
+            const filePath = path.join(tempDir, file);
+            try {
+                fs.unlinkSync(filePath);
+            }
+            catch (error) {
+                console.error(`Ошибка при удалении файла ${filePath}:`, error);
+            }
+        }
+    }
+}
+// Функция для обработки ссылки
+function processUrl(text) {
+    text = text.trim();
+    if (!text.match(/^https?:\/\//i)) {
+        text = 'https://' + text;
+    }
+    return text;
+}
+// Функция для скачивания файла
+async function downloadFile(url, filePath) {
+    const response = await (0, axios_1.default)({
+        method: 'GET',
+        url: url,
+        responseType: 'stream'
+    });
+    const writer = fs.createWriteStream(filePath);
+    response.data.pipe(writer);
+    return new Promise((resolve, reject) => {
+        writer.on('finish', resolve);
+        writer.on('error', reject);
+    });
+}
+// Функция для создания QR-кода с логотипом
+async function generateQRWithLogo(url, logoPath) {
+    const tempDir = path.join(__dirname, 'temp');
+    if (!fs.existsSync(tempDir)) {
+        fs.mkdirSync(tempDir);
+    }
+    const unique = `${Date.now()}_${Math.floor(Math.random() * 100000)}`;
+    const qrCodePath = path.join(tempDir, `${unique}_qr.png`);
+    const qrWithLogoPath = path.join(tempDir, `${unique}_qr_logo.png`);
+    const qrFinalPath = path.join(tempDir, `${unique}_qr_final.png`);
+    // Размеры
+    const qrSize = 400;
+    const logoSize = 100;
+    const padding = 25; // Паддинг вокруг логотипа
+    const whiteBoxSize = logoSize + padding * 2;
+    // Генерируем QR-код с максимальной коррекцией ошибок
+    await qrcode.toFile(qrCodePath, url, {
+        width: qrSize,
+        margin: 2,
+        errorCorrectionLevel: 'H',
+        color: {
+            dark: '#000000',
+            light: '#ffffff'
+        }
+    });
+    if (logoPath) {
+        try {
+            let logoBuffer;
+            if (logoPath.endsWith('.svg')) {
+                const svgBuffer = fs.readFileSync(logoPath);
+                logoBuffer = await (0, svg2png_1.default)(svgBuffer, { width: logoSize, height: logoSize });
+            }
+            else {
+                logoBuffer = fs.readFileSync(logoPath);
+            }
+            // Вырезаем белый круг в центре QR-кода
+            const qrImage = (0, sharp_1.default)(qrCodePath);
+            const whiteCircle = Buffer.from(`<svg width='${whiteBoxSize}' height='${whiteBoxSize}'>
+                    <circle cx='${whiteBoxSize / 2}' cy='${whiteBoxSize / 2}' r='${whiteBoxSize / 2}' fill='white' />
+                </svg>`);
+            await qrImage
+                .composite([
+                {
+                    input: whiteCircle,
+                    top: Math.floor((qrSize - whiteBoxSize) / 2),
+                    left: Math.floor((qrSize - whiteBoxSize) / 2)
+                }
+            ])
+                .toFile(qrWithLogoPath);
+            // Теперь накладываем логотип на белый круг, сохраняем в финальный файл
+            await (0, sharp_1.default)(qrWithLogoPath)
+                .composite([
+                {
+                    input: logoBuffer,
+                    top: Math.floor((qrSize - logoSize) / 2),
+                    left: Math.floor((qrSize - logoSize) / 2)
+                }
+            ])
+                .toFile(qrFinalPath);
+            // Удаляем промежуточные файлы
+            fs.unlinkSync(qrCodePath);
+            fs.unlinkSync(qrWithLogoPath);
+            return qrFinalPath;
+        }
+        catch (error) {
+            console.error('Error adding logo to QR code:', error);
+            return qrCodePath; // fallback: возвращаем обычный QR
+        }
+    }
+    return qrCodePath;
+}
 // Инициализация бота
 const bot = new telegraf_1.Telegraf(process.env.BOT_TOKEN);
+// Настройка меню команд
+async function setupCommands() {
+    try {
+        await bot.telegram.setMyCommands([
+            { command: 'start', description: '🚀 Запустить бота и показать приветствие' },
+            { command: 'create', description: '🔄 Создать QR-код с логотипом' },
+            { command: 'help', description: '📖 Показать справку по использованию бота' },
+            { command: 'cancel', description: '❌ Отменить текущую операцию' }
+        ]);
+        console.log('Menu commands set successfully');
+    }
+    catch (error) {
+        console.error('Error setting menu commands:', error);
+    }
+}
+setupCommands();
+// Очистка temp при запуске
+cleanupTempFolder();
+// Периодическая очистка temp каждые 6 часов
+setInterval(cleanupTempFolder, 6 * 60 * 60 * 1000);
 // Обработка команды /start
 bot.command('start', async (ctx) => {
     const welcomeMessage = `
 👋 Привет! Я бот для генерации QR-кодов.
 
 📝 Как использовать:
-1. Просто отправьте мне любую ссылку
-2. Я сгенерирую QR-код для этой ссылки
-3. Вы получите изображение QR-кода
+1. Используйте команду /create или нажмите кнопку "Создать QR-код"
+2. Выберите тип QR-кода: с логотипом или без
+3. Если вы выбрали с логотипом - отправьте логотип в формате SVG
+4. Отправьте ссылку
+5. Получите готовый QR-код
 
 🔍 Доступные команды:
-/start - Показать это сообщение
+/start - Запустить бота
+/create - Создать QR-код
 /help - Показать справку
+/cancel - Отменить операцию
     `;
     await ctx.reply(welcomeMessage, telegraf_1.Markup.keyboard([
-        ['📝 Справка']
+        ['🔄 Создать QR-код']
+    ]).resize());
+});
+// Обработка команды /create
+bot.command('create', async (ctx) => {
+    const userId = ctx.from.id;
+    userStates.set(userId, { awaitingChoice: true, awaitingLogo: false, awaitingUrl: false });
+    await ctx.reply('Выбери тип QR-кода:', telegraf_1.Markup.keyboard([
+        ['✅ С логотипом'],
+        ['❌ Без логотипа'],
+        ['🔙 Отменить']
+    ]).resize());
+});
+// Обработка команды /cancel
+bot.command('cancel', async (ctx) => {
+    const userId = ctx.from.id;
+    userStates.delete(userId);
+    await ctx.reply('✅ Операция отменена.', telegraf_1.Markup.keyboard([
+        ['🔄 Создать QR-код']
     ]).resize());
 });
 // Обработка команды /help
@@ -72,61 +231,156 @@ bot.command('help', async (ctx) => {
     const helpMessage = `
 📝 Справка по использованию бота:
 
-1. Отправьте любую ссылку, и я сгенерирую QR-код
-2. Поддерживаются все форматы ссылок (http://, https://, ftp:// и т.д.)
-3. QR-код будет отправлен вам в виде изображения
-4. Изображение автоматически удалится через 5 минут
+1. Нажмите кнопку "Создать QR-код" или команду /create
+2. Выберите тип QR-кода: с логотипом или без
+3. Если вы выбрали с логотипом - отправьте логотип в формате SVG
+4. Отправьте ссылку или текст для QR-кода
+5. Получите готовый QR-код
 
 ⚠️ Ограничения:
 - Максимальная длина ссылки: 2048 символов
 - Поддерживаются только текстовые ссылки
+- Логотип должен быть в формате SVG
     `;
     await ctx.reply(helpMessage);
 });
+// Обработка нажатия кнопки "Создать QR-код"
+bot.hears('🔄 Создать QR-код', async (ctx) => {
+    const userId = ctx.from.id;
+    userStates.set(userId, { awaitingChoice: true, awaitingLogo: false, awaitingUrl: false });
+    await ctx.reply('Выбери тип QR-кода:', telegraf_1.Markup.keyboard([
+        ['✅ С логотипом'],
+        ['❌ Без логотипа'],
+        ['🔙 Отменить']
+    ]).resize());
+});
+// Обработка нажатия кнопки "С логотипом"
+bot.hears('✅ С логотипом', async (ctx) => {
+    const userId = ctx.from.id;
+    const state = userStates.get(userId);
+    if (state?.awaitingChoice) {
+        state.awaitingChoice = false;
+        state.awaitingLogo = true;
+        state.awaitingUrl = false;
+        userStates.set(userId, state);
+        await ctx.reply('Отправь логотип в формате SVG.', telegraf_1.Markup.keyboard([
+            ['🔙 Отменить']
+        ]).resize());
+    }
+});
+// Обработка нажатия кнопки "Без логотипа"
+bot.hears('❌ Без логотипа', async (ctx) => {
+    const userId = ctx.from.id;
+    const state = userStates.get(userId);
+    if (state?.awaitingChoice) {
+        state.awaitingChoice = false;
+        state.awaitingLogo = false;
+        state.awaitingUrl = true;
+        userStates.set(userId, state);
+        await ctx.reply('Пришли ссылку или текст, который зашить в QR-код.', telegraf_1.Markup.keyboard([
+            ['🔙 Отменить']
+        ]).resize());
+    }
+});
+// Обработка нажатия кнопки "Отменить"
+bot.hears('🔙 Отменить', async (ctx) => {
+    const userId = ctx.from.id;
+    userStates.delete(userId);
+    await ctx.reply('✅ Операция отменена.', telegraf_1.Markup.keyboard([
+        ['🔄 Создать QR-код']
+    ]).resize());
+});
+// Обработка получения фото
+bot.on('photo', async (ctx) => {
+    const userId = ctx.from.id;
+    const state = userStates.get(userId);
+    if (state?.awaitingLogo) {
+        try {
+            const photo = ctx.message.photo[ctx.message.photo.length - 1];
+            const file = await ctx.telegram.getFile(photo.file_id);
+            const logoPath = path.join(__dirname, 'temp', `logo_${Date.now()}.svg`);
+            // Скачиваем логотип
+            await downloadFile(`https://api.telegram.org/file/bot${process.env.BOT_TOKEN}/${file.file_path}`, logoPath);
+            state.logoPath = logoPath;
+            state.awaitingLogo = false;
+            state.awaitingUrl = true;
+            userStates.set(userId, state);
+            await ctx.reply('Теперь пришли ссылку или текст, который зашить в QR-код.', telegraf_1.Markup.keyboard([
+                ['🔙 Отменить']
+            ]).resize());
+        }
+        catch (error) {
+            console.error('Error processing logo:', error);
+            await ctx.reply('Произошла ошибка при обработке логотипа. Пожалуйста, попробуйте еще раз.');
+        }
+    }
+});
+// Обработка получения SVG-документа
+bot.on('document', async (ctx) => {
+    const userId = ctx.from.id;
+    const state = userStates.get(userId);
+    if (state?.awaitingLogo) {
+        try {
+            const document = ctx.message.document;
+            // Проверяем, что это SVG
+            if (!document.file_name || !document.file_name.endsWith('.svg')) {
+                await ctx.reply('Пожалуйста, отправьте логотип в формате SVG.');
+                return;
+            }
+            const file = await ctx.telegram.getFile(document.file_id);
+            const logoPath = path.join(__dirname, 'temp', `logo_${Date.now()}.svg`);
+            await downloadFile(`https://api.telegram.org/file/bot${process.env.BOT_TOKEN}/${file.file_path}`, logoPath);
+            state.logoPath = logoPath;
+            state.awaitingLogo = false;
+            state.awaitingUrl = true;
+            userStates.set(userId, state);
+            await ctx.reply('Теперь пришли ссылку или текст, который зашить в QR-код.', telegraf_1.Markup.keyboard([
+                ['🔙 Отменить']
+            ]).resize());
+        }
+        catch (error) {
+            console.error('Error processing SVG logo:', error);
+            await ctx.reply('Произошла ошибка при обработке логотипа. Пожалуйста, попробуйте еще раз.');
+        }
+    }
+});
 // Обработка текстовых сообщений
 bot.on((0, filters_1.message)('text'), async (ctx) => {
+    const userId = ctx.from.id;
+    const state = userStates.get(userId);
     const text = ctx.message.text;
-    // Проверка на кнопку "Справка"
-    if (text === '📝 Справка') {
-        await ctx.reply('Отправьте мне любую ссылку, и я сгенерирую QR-код для неё!');
-        return;
-    }
-    // Проверка, является ли текст URL
-    try {
-        new URL(text);
-    }
-    catch {
-        await ctx.reply('Пожалуйста, отправьте корректную ссылку!');
-        return;
-    }
-    try {
-        // Генерация QR-кода
-        const qrCodePath = path.join(__dirname, 'temp', `${Date.now()}.png`);
-        // Создаем временную директорию, если её нет
-        if (!fs.existsSync(path.join(__dirname, 'temp'))) {
-            fs.mkdirSync(path.join(__dirname, 'temp'));
+    if (state?.awaitingUrl) {
+        let processedUrl;
+        try {
+            processedUrl = processUrl(text);
+            new URL(processedUrl);
         }
-        // Генерируем QR-код
-        await qrcode.toFile(qrCodePath, text, {
-            width: 400,
-            margin: 2,
-            color: {
-                dark: '#000000',
-                light: '#ffffff'
-            }
-        });
-        // Отправляем QR-код
-        await ctx.replyWithPhoto({ source: qrCodePath });
-        // Удаляем файл через 5 минут
-        setTimeout(() => {
-            if (fs.existsSync(qrCodePath)) {
-                fs.unlinkSync(qrCodePath);
-            }
-        }, 5 * 60 * 1000);
-    }
-    catch (error) {
-        console.error('Error generating QR code:', error);
-        await ctx.reply('Произошла ошибка при генерации QR-кода. Пожалуйста, попробуйте позже.');
+        catch {
+            await ctx.reply('Пожалуйста, отправьте корректную ссылку!');
+            return;
+        }
+        try {
+            const qrCodePath = await generateQRWithLogo(processedUrl, state.logoPath);
+            // Отправляем QR-код
+            await ctx.replyWithPhoto({ source: qrCodePath });
+            // Удаляем файл через 5 минут
+            setTimeout(() => {
+                if (fs.existsSync(qrCodePath)) {
+                    try {
+                        fs.unlinkSync(qrCodePath);
+                    }
+                    catch (error) {
+                        console.error(`Ошибка при удалении файла ${qrCodePath}:`, error);
+                    }
+                }
+            }, 5 * 60 * 1000);
+            // Очищаем состояние пользователя
+            userStates.delete(userId);
+        }
+        catch (error) {
+            console.error('Error generating QR code:', error);
+            await ctx.reply('Произошла ошибка при генерации QR-кода. Пожалуйста, попробуйте позже.');
+        }
     }
 });
 // Запуск бота
@@ -136,5 +390,11 @@ bot.launch().then(() => {
     console.error('Error starting bot:', error);
 });
 // Обработка завершения работы
-process.once('SIGINT', () => bot.stop('SIGINT'));
-process.once('SIGTERM', () => bot.stop('SIGTERM'));
+process.once('SIGINT', () => {
+    cleanupTempFolder();
+    bot.stop('SIGINT');
+});
+process.once('SIGTERM', () => {
+    cleanupTempFolder();
+    bot.stop('SIGTERM');
+});

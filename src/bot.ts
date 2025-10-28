@@ -20,8 +20,9 @@ if (!process.env.BOT_TOKEN) {
 
 // Интерфейс для хранения состояния пользователя
 interface UserState {
-    waitingForLogo: boolean;
-    waitingForUrl: boolean;
+    awaitingChoice: boolean;  // ожидаем выбор между "С логотипом" или "Без логотипа"
+    awaitingLogo: boolean;   // ожидаем логотип
+    awaitingUrl: boolean;     // ожидаем ссылку
     logoPath?: string;
 }
 
@@ -109,24 +110,24 @@ async function generateQRWithLogo(url: string, logoPath?: string): Promise<strin
                 logoBuffer = fs.readFileSync(logoPath);
             }
 
-            // Вырезаем белый квадрат в центре QR-кода
+            // Вырезаем белый круг в центре QR-кода
             const qrImage = sharp(qrCodePath);
-            const whiteBox = Buffer.from(
+            const whiteCircle = Buffer.from(
                 `<svg width='${whiteBoxSize}' height='${whiteBoxSize}'>
-                    <rect x='0' y='0' width='${whiteBoxSize}' height='${whiteBoxSize}' fill='white' />
+                    <circle cx='${whiteBoxSize / 2}' cy='${whiteBoxSize / 2}' r='${whiteBoxSize / 2}' fill='white' />
                 </svg>`
             );
             await qrImage
                 .composite([
                     {
-                        input: whiteBox,
+                        input: whiteCircle,
                         top: Math.floor((qrSize - whiteBoxSize) / 2),
                         left: Math.floor((qrSize - whiteBoxSize) / 2)
                     }
                 ])
                 .toFile(qrWithLogoPath);
 
-            // Теперь накладываем логотип на белый квадрат, сохраняем в финальный файл
+            // Теперь накладываем логотип на белый круг, сохраняем в финальный файл
             await sharp(qrWithLogoPath)
                 .composite([
                     {
@@ -153,6 +154,23 @@ async function generateQRWithLogo(url: string, logoPath?: string): Promise<strin
 // Инициализация бота
 const bot = new Telegraf(process.env.BOT_TOKEN);
 
+// Настройка меню команд
+async function setupCommands() {
+    try {
+        await bot.telegram.setMyCommands([
+            { command: 'start', description: '🚀 Запустить бота и показать приветствие' },
+            { command: 'create', description: '🔄 Создать QR-код с логотипом' },
+            { command: 'help', description: '📖 Показать справку по использованию бота' },
+            { command: 'cancel', description: '❌ Отменить текущую операцию' }
+        ]);
+        console.log('Menu commands set successfully');
+    } catch (error) {
+        console.error('Error setting menu commands:', error);
+    }
+}
+
+setupCommands();
+
 // Очистка temp при запуске
 cleanupTempFolder();
 
@@ -165,14 +183,17 @@ bot.command('start', async (ctx) => {
 👋 Привет! Я бот для генерации QR-кодов.
 
 📝 Как использовать:
-1. Нажмите кнопку "Создать QR-код"
-2. Отправьте логотип (или пропустите этот шаг)
-3. Отправьте ссылку
-4. Получите QR-код с вашим логотипом
+1. Используйте команду /create или нажмите кнопку "Создать QR-код"
+2. Выберите тип QR-кода: с логотипом или без
+3. Если вы выбрали с логотипом - отправьте логотип в формате SVG
+4. Отправьте ссылку
+5. Получите готовый QR-код
 
 🔍 Доступные команды:
-/start - Показать это сообщение
+/start - Запустить бота
+/create - Создать QR-код
 /help - Показать справку
+/cancel - Отменить операцию
     `;
 
     await ctx.reply(welcomeMessage, Markup.keyboard([
@@ -180,15 +201,44 @@ bot.command('start', async (ctx) => {
     ]).resize());
 });
 
+// Обработка команды /create
+bot.command('create', async (ctx) => {
+    const userId = ctx.from.id;
+    userStates.set(userId, { awaitingChoice: true, awaitingLogo: false, awaitingUrl: false });
+
+    await ctx.reply(
+        'Выбери тип QR-кода:',
+        Markup.keyboard([
+            ['✅ С логотипом'],
+            ['❌ Без логотипа'],
+            ['🔙 Отменить']
+        ]).resize()
+    );
+});
+
+// Обработка команды /cancel
+bot.command('cancel', async (ctx) => {
+    const userId = ctx.from.id;
+    userStates.delete(userId);
+
+    await ctx.reply(
+        '✅ Операция отменена.',
+        Markup.keyboard([
+            ['🔄 Создать QR-код']
+        ]).resize()
+    );
+});
+
 // Обработка команды /help
 bot.command('help', async (ctx) => {
     const helpMessage = `
 📝 Справка по использованию бота:
 
-1. Нажмите кнопку "Создать QR-код"
-2. Отправьте логотип в формате SVG (или нажмите "Пропустить")
-3. Отправьте ссылку или текст для QR-кода
-4. Получите готовый QR-код с вашим логотипом
+1. Нажмите кнопку "Создать QR-код" или команду /create
+2. Выберите тип QR-кода: с логотипом или без
+3. Если вы выбрали с логотипом - отправьте логотип в формате SVG
+4. Отправьте ссылку или текст для QR-кода
+5. Получите готовый QR-код
 
 ⚠️ Ограничения:
 - Максимальная длина ссылки: 2048 символов
@@ -202,33 +252,69 @@ bot.command('help', async (ctx) => {
 // Обработка нажатия кнопки "Создать QR-код"
 bot.hears('🔄 Создать QR-код', async (ctx) => {
     const userId = ctx.from.id;
-    userStates.set(userId, { waitingForLogo: true, waitingForUrl: false });
+    userStates.set(userId, { awaitingChoice: true, awaitingLogo: false, awaitingUrl: false });
 
     await ctx.reply(
-        'Отправь логотип, который ты хочешь вставить в QR-код (можно пропустить).',
+        'Выбери тип QR-кода:',
         Markup.keyboard([
-            ['⏩ Пропустить']
+            ['✅ С логотипом'],
+            ['❌ Без логотипа'],
+            ['🔙 Отменить']
         ]).resize()
     );
 });
 
-// Обработка нажатия кнопки "Пропустить"
-bot.hears('⏩ Пропустить', async (ctx) => {
+// Обработка нажатия кнопки "С логотипом"
+bot.hears('✅ С логотипом', async (ctx) => {
     const userId = ctx.from.id;
     const state = userStates.get(userId);
     
-    if (state?.waitingForLogo) {
-        state.waitingForLogo = false;
-        state.waitingForUrl = true;
+    if (state?.awaitingChoice) {
+        state.awaitingChoice = false;
+        state.awaitingLogo = true;
+        state.awaitingUrl = false;
         userStates.set(userId, state);
 
         await ctx.reply(
-            'Теперь пришли ссылку или текст, который зашить в QR-код.',
+            'Отправь логотип в формате SVG.',
             Markup.keyboard([
-                ['🔄 Создать QR-код']
+                ['🔙 Отменить']
             ]).resize()
         );
     }
+});
+
+// Обработка нажатия кнопки "Без логотипа"
+bot.hears('❌ Без логотипа', async (ctx) => {
+    const userId = ctx.from.id;
+    const state = userStates.get(userId);
+    
+    if (state?.awaitingChoice) {
+        state.awaitingChoice = false;
+        state.awaitingLogo = false;
+        state.awaitingUrl = true;
+        userStates.set(userId, state);
+
+        await ctx.reply(
+            'Пришли ссылку или текст, который зашить в QR-код.',
+            Markup.keyboard([
+                ['🔙 Отменить']
+            ]).resize()
+        );
+    }
+});
+
+// Обработка нажатия кнопки "Отменить"
+bot.hears('🔙 Отменить', async (ctx) => {
+    const userId = ctx.from.id;
+    userStates.delete(userId);
+
+    await ctx.reply(
+        '✅ Операция отменена.',
+        Markup.keyboard([
+            ['🔄 Создать QR-код']
+        ]).resize()
+    );
 });
 
 // Обработка получения фото
@@ -236,7 +322,7 @@ bot.on('photo', async (ctx) => {
     const userId = ctx.from.id;
     const state = userStates.get(userId);
 
-    if (state?.waitingForLogo) {
+    if (state?.awaitingLogo) {
         try {
             const photo = ctx.message.photo[ctx.message.photo.length - 1];
             const file = await ctx.telegram.getFile(photo.file_id);
@@ -246,14 +332,14 @@ bot.on('photo', async (ctx) => {
             await downloadFile(`https://api.telegram.org/file/bot${process.env.BOT_TOKEN}/${file.file_path}`, logoPath);
 
             state.logoPath = logoPath;
-            state.waitingForLogo = false;
-            state.waitingForUrl = true;
+            state.awaitingLogo = false;
+            state.awaitingUrl = true;
             userStates.set(userId, state);
 
             await ctx.reply(
                 'Теперь пришли ссылку или текст, который зашить в QR-код.',
                 Markup.keyboard([
-                    ['🔄 Создать QR-код']
+                    ['🔙 Отменить']
                 ]).resize()
             );
         } catch (error) {
@@ -268,7 +354,7 @@ bot.on('document', async (ctx) => {
     const userId = ctx.from.id;
     const state = userStates.get(userId);
 
-    if (state?.waitingForLogo) {
+    if (state?.awaitingLogo) {
         try {
             const document = ctx.message.document;
             // Проверяем, что это SVG
@@ -281,14 +367,14 @@ bot.on('document', async (ctx) => {
             await downloadFile(`https://api.telegram.org/file/bot${process.env.BOT_TOKEN}/${file.file_path}`, logoPath);
 
             state.logoPath = logoPath;
-            state.waitingForLogo = false;
-            state.waitingForUrl = true;
+            state.awaitingLogo = false;
+            state.awaitingUrl = true;
             userStates.set(userId, state);
 
             await ctx.reply(
                 'Теперь пришли ссылку или текст, который зашить в QR-код.',
                 Markup.keyboard([
-                    ['🔄 Создать QR-код']
+                    ['🔙 Отменить']
                 ]).resize()
             );
         } catch (error) {
@@ -304,7 +390,7 @@ bot.on(message('text'), async (ctx) => {
     const state = userStates.get(userId);
     const text = ctx.message.text;
 
-    if (state?.waitingForUrl) {
+    if (state?.awaitingUrl) {
         let processedUrl: string;
         try {
             processedUrl = processUrl(text);
