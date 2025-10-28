@@ -8,12 +8,21 @@
     "build": "tsc",
     "dev": "nodemon",
     "dev:simple": "ts-node src/bot.ts",
-    "watch": "tsc -w"
+    "watch": "tsc -w",
+    "pm2:start": "pm2 start ecosystem.config.js",
+    "pm2:stop": "pm2 stop qr-code-bot",
+    "pm2:restart": "pm2 restart qr-code-bot",
+    "pm2:delete": "pm2 delete qr-code-bot",
+    "pm2:logs": "pm2 logs qr-code-bot",
+    "pm2:status": "pm2 status",
+    "prod:build": "npm run build && npm run pm2:start",
+    "prod:restart": "npm run build && npm run pm2:restart"
   },
   "author": "",
   "license": "ISC",
   "dependencies": {
     "@types/sqlite3": "^3.1.11",
+    "axios": "^1.6.0",
     "dotenv": "^16.4.5",
     "qrcode": "^1.5.3",
     "sharp": "^0.34.1",

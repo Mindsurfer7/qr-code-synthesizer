@@ -64,18 +64,23 @@ const renderSettingsPresets = {
 };
 // Функция для очистки папки temp
 function cleanupTempFolder() {
-    const tempDir = path.join(__dirname, 'temp');
-    if (fs.existsSync(tempDir)) {
-        const files = fs.readdirSync(tempDir);
-        for (const file of files) {
-            const filePath = path.join(tempDir, file);
-            try {
-                fs.unlinkSync(filePath);
-            }
-            catch (error) {
-                console.error(`Ошибка при удалении файла ${filePath}:`, error);
+    try {
+        const tempDir = path.join(__dirname, 'temp');
+        if (fs.existsSync(tempDir)) {
+            const files = fs.readdirSync(tempDir);
+            for (const file of files) {
+                const filePath = path.join(tempDir, file);
+                try {
+                    fs.unlinkSync(filePath);
+                }
+                catch (error) {
+                    console.error(`Ошибка при удалении файла ${filePath}:`, error);
+                }
             }
         }
+    }
+    catch (error) {
+        console.error('Ошибка при очистке папки temp:', error);
     }
 }
 // Функция для обработки ссылки
@@ -88,133 +93,145 @@ function processUrl(text) {
 }
 // Функция для скачивания файла
 async function downloadFile(url, filePath) {
-    const response = await (0, axios_1.default)({
-        method: 'GET',
-        url: url,
-        responseType: 'stream'
-    });
-    const writer = fs.createWriteStream(filePath);
-    response.data.pipe(writer);
-    return new Promise((resolve, reject) => {
-        writer.on('finish', resolve);
-        writer.on('error', reject);
-    });
+    try {
+        const response = await (0, axios_1.default)({
+            method: 'GET',
+            url: url,
+            responseType: 'stream'
+        });
+        const writer = fs.createWriteStream(filePath);
+        response.data.pipe(writer);
+        return new Promise((resolve, reject) => {
+            writer.on('finish', resolve);
+            writer.on('error', reject);
+        });
+    }
+    catch (error) {
+        console.error('Error downloading file:', error);
+        throw new Error(`Failed to download file from ${url}`);
+    }
 }
 // Функция для создания QR-кода с логотипом
 async function generateQRWithLogo(url, logoPath, quality = 'high', renderSettings) {
-    const tempDir = path.join(__dirname, 'temp');
-    if (!fs.existsSync(tempDir)) {
-        fs.mkdirSync(tempDir);
-    }
-    const unique = `${Date.now()}_${Math.floor(Math.random() * 100000)}`;
-    const qrCodePath = path.join(tempDir, `${unique}_qr.png`);
-    const qrFinalPath = path.join(tempDir, `${unique}_qr_final.png`);
-    // Настройки качества
-    const qualitySettings = {
-        standard: { qrSize: 400, margin: 20, logoSize: 100, padding: 25 },
-        high: { qrSize: 800, margin: 40, logoSize: 200, padding: 50 },
-        ultra: { qrSize: 1600, margin: 80, logoSize: 400, padding: 100 }
-    };
-    const settings = qualitySettings[quality];
-    const { qrSize, margin, logoSize, padding } = settings;
-    const whiteCircleRadius = (logoSize + padding * 2) / 2 * 0.85; // Уменьшено на 15%
-    // Применяем настройки рендеринга или используем значения по умолчанию
-    const roundedRadius = renderSettings?.roundedRadius ?? 0;
-    const moduleStyle = renderSettings?.moduleStyle ?? 'square';
-    // Получаем матрицу QR-кода через низкоуровневый API
-    const qr = qrcode.create(url, {
-        errorCorrectionLevel: 'H'
-    });
-    const moduleCount = qr.modules.size;
-    // Размер QR-кода без margin (внутренняя область)
-    const qrContentSize = qrSize - (margin * 2);
-    // Создаем SVG с модифицированной матрицей (без паттернов в центре)
-    let svgString = `<svg width="${qrSize}" height="${qrSize}" xmlns="http://www.w3.org/2000/svg" shape-rendering="crispEdges" image-rendering="crisp-edges">`;
-    // Добавляем белый фон
-    svgString += `<rect x="0" y="0" width="${qrSize}" height="${qrSize}" fill="#ffffff"/>`;
-    const cellSize = qrContentSize / moduleCount;
-    const centerX = moduleCount / 2;
-    const centerY = moduleCount / 2;
-    // Функция для рендеринга модуля
-    function renderModule(x, y, isDark, color) {
-        if (moduleStyle === 'circle') {
-            // Круглые модули
-            const radius = cellSize / 2 * 0.9; // 90% размера для красоты
-            return `<circle cx="${x + cellSize / 2}" cy="${y + cellSize / 2}" r="${radius}" fill="${color}"/>`;
+    try {
+        const tempDir = path.join(__dirname, 'temp');
+        if (!fs.existsSync(tempDir)) {
+            fs.mkdirSync(tempDir);
         }
-        else {
-            // Квадратные модули (с опциональным скруглением)
-            return `<rect x="${x}" y="${y}" width="${cellSize}" height="${cellSize}" rx="${roundedRadius}" ry="${roundedRadius}" fill="${color}"/>`;
-        }
-    }
-    for (let row = 0; row < moduleCount; row++) {
-        for (let col = 0; col < moduleCount; col++) {
-            const isDark = qr.modules.get(row, col);
-            // Сдвигаем координаты на margin
-            const x = col * cellSize + margin;
-            const y = row * cellSize + margin;
-            // Вычисляем расстояние от центра до текущего модуля
-            const dx = (col - centerX) * cellSize;
-            const dy = (row - centerY) * cellSize;
-            const distance = Math.sqrt(dx * dx + dy * dy);
-            // Если модуль находится внутри круга для логотипа, делаем его белым
-            if (distance < whiteCircleRadius) {
-                svgString += renderModule(x, y, false, '#ffffff');
+        const unique = `${Date.now()}_${Math.floor(Math.random() * 100000)}`;
+        const qrCodePath = path.join(tempDir, `${unique}_qr.png`);
+        const qrFinalPath = path.join(tempDir, `${unique}_qr_final.png`);
+        // Настройки качества
+        const qualitySettings = {
+            standard: { qrSize: 400, margin: 20, logoSize: 100, padding: 25 },
+            high: { qrSize: 800, margin: 40, logoSize: 200, padding: 50 },
+            ultra: { qrSize: 1600, margin: 80, logoSize: 400, padding: 100 }
+        };
+        const settings = qualitySettings[quality];
+        const { qrSize, margin, logoSize, padding } = settings;
+        const whiteCircleRadius = (logoSize + padding * 2) / 2 * 0.85; // Уменьшено на 15%
+        // Применяем настройки рендеринга или используем значения по умолчанию
+        const roundedRadius = renderSettings?.roundedRadius ?? 0;
+        const moduleStyle = renderSettings?.moduleStyle ?? 'square';
+        // Получаем матрицу QR-кода через низкоуровневый API
+        const qr = qrcode.create(url, {
+            errorCorrectionLevel: 'H'
+        });
+        const moduleCount = qr.modules.size;
+        // Размер QR-кода без margin (внутренняя область)
+        const qrContentSize = qrSize - (margin * 2);
+        // Создаем SVG с модифицированной матрицей (без паттернов в центре)
+        let svgString = `<svg width="${qrSize}" height="${qrSize}" xmlns="http://www.w3.org/2000/svg" shape-rendering="crispEdges" image-rendering="crisp-edges">`;
+        // Добавляем белый фон
+        svgString += `<rect x="0" y="0" width="${qrSize}" height="${qrSize}" fill="#ffffff"/>`;
+        const cellSize = qrContentSize / moduleCount;
+        const centerX = moduleCount / 2;
+        const centerY = moduleCount / 2;
+        // Функция для рендеринга модуля
+        function renderModule(x, y, isDark, color) {
+            if (moduleStyle === 'circle') {
+                // Круглые модули
+                const radius = cellSize / 2 * 0.9; // 90% размера для красоты
+                return `<circle cx="${x + cellSize / 2}" cy="${y + cellSize / 2}" r="${radius}" fill="${color}"/>`;
             }
             else {
-                svgString += renderModule(x, y, false, isDark ? '#000000' : '#ffffff');
+                // Квадратные модули (с опциональным скруглением)
+                return `<rect x="${x}" y="${y}" width="${cellSize}" height="${cellSize}" rx="${roundedRadius}" ry="${roundedRadius}" fill="${color}"/>`;
             }
         }
-    }
-    svgString += '</svg>';
-    // Конвертируем SVG в PNG с высоким качеством
-    const svgBuffer = Buffer.from(svgString);
-    const pngBuffer = await (0, sharp_1.default)(svgBuffer)
-        .png({
-        quality: 100,
-        compressionLevel: 0,
-        adaptiveFiltering: false,
-        force: true
-    })
-        .toBuffer();
-    fs.writeFileSync(qrCodePath, pngBuffer);
-    // Если есть логотип, накладываем его
-    if (logoPath) {
-        try {
-            let logoBuffer;
-            if (logoPath.endsWith('.svg')) {
-                const svgBuffer = fs.readFileSync(logoPath);
-                logoBuffer = await (0, svg2png_1.default)(svgBuffer, { width: logoSize, height: logoSize });
-            }
-            else {
-                logoBuffer = fs.readFileSync(logoPath);
-            }
-            // Накладываем логотип в центр QR-кода с высоким качеством
-            await (0, sharp_1.default)(qrCodePath)
-                .composite([
-                {
-                    input: logoBuffer,
-                    top: Math.floor((qrSize - logoSize) / 2),
-                    left: Math.floor((qrSize - logoSize) / 2)
+        for (let row = 0; row < moduleCount; row++) {
+            for (let col = 0; col < moduleCount; col++) {
+                const isDark = qr.modules.get(row, col);
+                // Сдвигаем координаты на margin
+                const x = col * cellSize + margin;
+                const y = row * cellSize + margin;
+                // Вычисляем расстояние от центра до текущего модуля
+                const dx = (col - centerX) * cellSize;
+                const dy = (row - centerY) * cellSize;
+                const distance = Math.sqrt(dx * dx + dy * dy);
+                // Если модуль находится внутри круга для логотипа, делаем его белым
+                if (distance < whiteCircleRadius) {
+                    svgString += renderModule(x, y, false, '#ffffff');
                 }
-            ])
-                .png({
-                quality: 100,
-                compressionLevel: 0,
-                adaptiveFiltering: false,
-                force: true
-            })
-                .toFile(qrFinalPath);
-            // Удаляем промежуточный файл
-            fs.unlinkSync(qrCodePath);
-            return qrFinalPath;
+                else {
+                    svgString += renderModule(x, y, false, isDark ? '#000000' : '#ffffff');
+                }
+            }
         }
-        catch (error) {
-            console.error('Error adding logo to QR code:', error);
-            return qrCodePath; // fallback: возвращаем обычный QR
+        svgString += '</svg>';
+        // Конвертируем SVG в PNG с высоким качеством
+        const svgBuffer = Buffer.from(svgString);
+        const pngBuffer = await (0, sharp_1.default)(svgBuffer)
+            .png({
+            quality: 100,
+            compressionLevel: 0,
+            adaptiveFiltering: false,
+            force: true
+        })
+            .toBuffer();
+        fs.writeFileSync(qrCodePath, pngBuffer);
+        // Если есть логотип, накладываем его
+        if (logoPath) {
+            try {
+                let logoBuffer;
+                if (logoPath.endsWith('.svg')) {
+                    const svgBuffer = fs.readFileSync(logoPath);
+                    logoBuffer = await (0, svg2png_1.default)(svgBuffer, { width: logoSize, height: logoSize });
+                }
+                else {
+                    logoBuffer = fs.readFileSync(logoPath);
+                }
+                // Накладываем логотип в центр QR-кода с высоким качеством
+                await (0, sharp_1.default)(qrCodePath)
+                    .composite([
+                    {
+                        input: logoBuffer,
+                        top: Math.floor((qrSize - logoSize) / 2),
+                        left: Math.floor((qrSize - logoSize) / 2)
+                    }
+                ])
+                    .png({
+                    quality: 100,
+                    compressionLevel: 0,
+                    adaptiveFiltering: false,
+                    force: true
+                })
+                    .toFile(qrFinalPath);
+                // Удаляем промежуточный файл
+                fs.unlinkSync(qrCodePath);
+                return qrFinalPath;
+            }
+            catch (error) {
+                console.error('Error adding logo to QR code:', error);
+                return qrCodePath; // fallback: возвращаем обычный QR
+            }
         }
+        return qrCodePath;
     }
-    return qrCodePath;
+    catch (error) {
+        console.error('Error generating QR code:', error);
+        throw new Error('Failed to generate QR code');
+    }
 }
 // Инициализация бота
 const bot = new telegraf_1.Telegraf(process.env.BOT_TOKEN);
@@ -223,7 +240,7 @@ async function setupCommands() {
     try {
         await bot.telegram.setMyCommands([
             { command: 'start', description: '🚀 Запустить бота и показать приветствие' },
-            { command: 'create', description: '🔄 Создать высококачественный QR-код' },
+            { command: 'create', description: '⚡ Создать высококачественный QR-код' },
             { command: 'balance', description: '📊 Посмотреть баланс доступных QR-кодов' },
             { command: 'pay', description: '💳 Оплатить премиум-возможности' },
             { command: 'help', description: '📖 Показать справку по использованию бота' },
@@ -231,7 +248,6 @@ async function setupCommands() {
             { command: 'terms', description: '📋 Условия использования' },
             { command: 'cancel', description: '❌ Отменить текущую операцию' }
         ]);
-        console.log('Menu commands set successfully');
     }
     catch (error) {
         console.error('Error setting menu commands:', error);
@@ -245,17 +261,6 @@ setInterval(cleanupTempFolder, 6 * 60 * 60 * 1000);
 // Обработка команды /start
 bot.command('start', async (ctx) => {
     try {
-        // Логируем все сообщения в админ-чат
-        const adminChatId = process.env.ADMIN_CHAT_ID;
-        if (adminChatId && ctx.chat.id.toString() === adminChatId) {
-            console.log('\n🔔 Сообщение в админ-чате:');
-            console.log(`👤 User ID: ${ctx.from.id}`);
-            console.log(`👤 Username: @${ctx.from.username || 'unknown'}`);
-            console.log(`👤 Name: ${ctx.from.first_name || ''} ${ctx.from.last_name || ''}`);
-            console.log(`💬 Message: ${ctx.message.text}`);
-            console.log(`🆔 Chat ID: ${ctx.chat.id}`);
-            console.log(`📅 Time: ${new Date().toLocaleString('ru-RU')}\n`);
-        }
         // Создаем или получаем пользователя в БД
         const user = await database_1.database.getOrCreateUser(ctx.from.id, ctx.from.username || null, ctx.from.first_name || null, ctx.from.last_name || null);
         const welcomeMessage = `
@@ -289,7 +294,7 @@ bot.command('start', async (ctx) => {
 /cancel - Отменить операцию
     `;
         await ctx.reply(welcomeMessage, telegraf_1.Markup.keyboard([
-            ['🔄 Создать QR-код']
+            ['⚡ Создать QR-код']
         ]).resize());
     }
     catch (error) {
@@ -299,21 +304,33 @@ bot.command('start', async (ctx) => {
 });
 // Обработка команды /create
 bot.command('create', async (ctx) => {
-    const userId = ctx.from.id;
-    userStates.set(userId, { awaitingChoice: false, awaitingLogo: false, awaitingUrl: false, awaitingQuality: false, awaitingRenderSettings: true, awaitingSupportMessage: false });
-    await ctx.reply('Выбери стиль модулей QR-кода:', telegraf_1.Markup.keyboard([
-        ['Квадраты', 'Скругленные'],
-        ['Круглые'],
-        ['🔙 Отменить']
-    ]).resize());
+    try {
+        const userId = ctx.from.id;
+        userStates.set(userId, { awaitingChoice: false, awaitingLogo: false, awaitingUrl: false, awaitingQuality: false, awaitingRenderSettings: true, awaitingSupportMessage: false });
+        await ctx.reply('Выбери стиль модулей QR-кода:', telegraf_1.Markup.keyboard([
+            ['Квадраты', 'Скругленные'],
+            ['Круглые'],
+            ['🔙 Отменить']
+        ]).resize());
+    }
+    catch (error) {
+        console.error('Error in /create command:', error);
+        await ctx.reply('Произошла ошибка. Попробуйте еще раз.');
+    }
 });
 // Обработка команды /cancel
 bot.command('cancel', async (ctx) => {
-    const userId = ctx.from.id;
-    userStates.delete(userId);
-    await ctx.reply('✅ Операция отменена.', telegraf_1.Markup.keyboard([
-        ['🔄 Создать QR-код']
-    ]).resize());
+    try {
+        const userId = ctx.from.id;
+        userStates.delete(userId);
+        await ctx.reply('✅ Операция отменена.', telegraf_1.Markup.keyboard([
+            ['⚡ Создать QR-код']
+        ]).resize());
+    }
+    catch (error) {
+        console.error('Error in /cancel command:', error);
+        await ctx.reply('Произошла ошибка. Попробуйте еще раз.');
+    }
 });
 // Обработка команды /balance
 bot.command('balance', async (ctx) => {
@@ -512,7 +529,6 @@ bot.on('successful_payment', async (ctx) => {
         const paymentId = ctx.message.successful_payment.telegram_payment_charge_id;
         const totalAmount = ctx.message.successful_payment.total_amount;
         const payload = ctx.message.successful_payment.invoice_payload;
-        console.log(`Payment successful: ${paymentId}, amount: ${totalAmount} XTR, payload: ${payload}`);
         // Парсим payload для определения продукта
         const payloadParts = payload.split('_');
         if (payloadParts.length >= 3) {
@@ -660,184 +676,250 @@ bot.command('terms', async (ctx) => {
     await ctx.reply(termsMessage, { parse_mode: 'HTML' });
 });
 // Обработка нажатия кнопки "Создать QR-код"
-bot.hears('🔄 Создать QR-код', async (ctx) => {
-    const userId = ctx.from.id;
-    userStates.set(userId, { awaitingChoice: false, awaitingLogo: false, awaitingUrl: false, awaitingQuality: false, awaitingRenderSettings: true, awaitingSupportMessage: false });
-    await ctx.reply('Выбери стиль модулей QR-кода:', telegraf_1.Markup.keyboard([
-        ['Квадраты', 'Скругленные'],
-        ['Круглые'],
-        ['🔙 Отменить']
-    ]).resize());
+bot.hears('⚡ Создать QR-код', async (ctx) => {
+    try {
+        const userId = ctx.from.id;
+        userStates.set(userId, { awaitingChoice: false, awaitingLogo: false, awaitingUrl: false, awaitingQuality: false, awaitingRenderSettings: true, awaitingSupportMessage: false });
+        await ctx.reply('Выбери стиль модулей QR-кода:', telegraf_1.Markup.keyboard([
+            ['Квадраты', 'Скругленные'],
+            ['Круглые'],
+            ['🔙 Отменить']
+        ]).resize());
+    }
+    catch (error) {
+        console.error('Error in create QR button handler:', error);
+        await ctx.reply('Произошла ошибка. Попробуйте еще раз.');
+    }
 });
 // Обработка выбора стиля рендеринга
 bot.hears('Квадраты', async (ctx) => {
-    const userId = ctx.from.id;
-    const state = userStates.get(userId);
-    if (state?.awaitingRenderSettings) {
-        state.renderSettings = renderSettingsPresets['Квадраты'];
-        state.awaitingRenderSettings = false;
-        state.awaitingQuality = true;
-        userStates.set(userId, state);
-        await ctx.reply('Выбери качество QR-кода:', telegraf_1.Markup.keyboard([
-            ['📱 Стандартное (400px)', '🖥️ Высокое (800px)'],
-            ['🎨 Ультра (1600px)'],
-            ['🔙 Отменить']
-        ]).resize());
+    try {
+        const userId = ctx.from.id;
+        const state = userStates.get(userId);
+        if (state?.awaitingRenderSettings) {
+            state.renderSettings = renderSettingsPresets['Квадраты'];
+            state.awaitingRenderSettings = false;
+            state.awaitingQuality = true;
+            userStates.set(userId, state);
+            await ctx.reply('Выбери качество QR-кода:', telegraf_1.Markup.keyboard([
+                ['📱 Стандартное (400px)', '🖥️ Высокое (800px)'],
+                ['🎨 Ультра (1600px)'],
+                ['🔙 Отменить']
+            ]).resize());
+        }
+    }
+    catch (error) {
+        console.error('Error in Квадраты handler:', error);
+        await ctx.reply('Произошла ошибка. Попробуйте еще раз.');
     }
 });
 bot.hears('Скругленные', async (ctx) => {
-    const userId = ctx.from.id;
-    const state = userStates.get(userId);
-    if (state?.awaitingRenderSettings) {
-        state.renderSettings = renderSettingsPresets['Скругленные'];
-        state.awaitingRenderSettings = false;
-        state.awaitingQuality = true;
-        userStates.set(userId, state);
-        await ctx.reply('Выбери качество QR-кода:', telegraf_1.Markup.keyboard([
-            ['📱 Стандартное (400px)', '🖥️ Высокое (800px)'],
-            ['🎨 Ультра (1600px)'],
-            ['🔙 Отменить']
-        ]).resize());
+    try {
+        const userId = ctx.from.id;
+        const state = userStates.get(userId);
+        if (state?.awaitingRenderSettings) {
+            state.renderSettings = renderSettingsPresets['Скругленные'];
+            state.awaitingRenderSettings = false;
+            state.awaitingQuality = true;
+            userStates.set(userId, state);
+            await ctx.reply('Выбери качество QR-кода:', telegraf_1.Markup.keyboard([
+                ['📱 Стандартное (400px)', '🖥️ Высокое (800px)'],
+                ['🎨 Ультра (1600px)'],
+                ['🔙 Отменить']
+            ]).resize());
+        }
+    }
+    catch (error) {
+        console.error('Error in Скругленные handler:', error);
+        await ctx.reply('Произошла ошибка. Попробуйте еще раз.');
     }
 });
 bot.hears('Круглые', async (ctx) => {
-    const userId = ctx.from.id;
-    const state = userStates.get(userId);
-    if (state?.awaitingRenderSettings) {
-        state.renderSettings = renderSettingsPresets['Круглые'];
-        state.awaitingRenderSettings = false;
-        state.awaitingQuality = true;
-        userStates.set(userId, state);
-        await ctx.reply('Выбери качество QR-кода:', telegraf_1.Markup.keyboard([
-            ['📱 Стандартное (400px)', '🖥️ Высокое (800px)'],
-            ['🎨 Ультра (1600px)'],
-            ['🔙 Отменить']
-        ]).resize());
+    try {
+        const userId = ctx.from.id;
+        const state = userStates.get(userId);
+        if (state?.awaitingRenderSettings) {
+            state.renderSettings = renderSettingsPresets['Круглые'];
+            state.awaitingRenderSettings = false;
+            state.awaitingQuality = true;
+            userStates.set(userId, state);
+            await ctx.reply('Выбери качество QR-кода:', telegraf_1.Markup.keyboard([
+                ['📱 Стандартное (400px)', '🖥️ Высокое (800px)'],
+                ['🎨 Ультра (1600px)'],
+                ['🔙 Отменить']
+            ]).resize());
+        }
+    }
+    catch (error) {
+        console.error('Error in Круглые handler:', error);
+        await ctx.reply('Произошла ошибка. Попробуйте еще раз.');
     }
 });
 // Обработка выбора качества
 bot.hears('📱 Стандартное (400px)', async (ctx) => {
-    const userId = ctx.from.id;
-    const state = userStates.get(userId);
-    if (state?.awaitingQuality) {
-        state.awaitingQuality = false;
-        state.awaitingChoice = true;
-        state.quality = 'standard';
-        userStates.set(userId, state);
-        await ctx.reply('Выбери тип QR-кода:', telegraf_1.Markup.keyboard([
-            ['✅ С логотипом'],
-            ['❌ Без логотипа'],
-            ['🔙 Отменить']
-        ]).resize());
+    try {
+        const userId = ctx.from.id;
+        const state = userStates.get(userId);
+        if (state?.awaitingQuality) {
+            state.awaitingQuality = false;
+            state.awaitingChoice = true;
+            state.quality = 'standard';
+            userStates.set(userId, state);
+            await ctx.reply('Выбери тип QR-кода:', telegraf_1.Markup.keyboard([
+                ['✅ С логотипом'],
+                ['❌ Без логотипа'],
+                ['🔙 Отменить']
+            ]).resize());
+        }
+    }
+    catch (error) {
+        console.error('Error in стандартное качество handler:', error);
+        await ctx.reply('Произошла ошибка. Попробуйте еще раз.');
     }
 });
 bot.hears('🖥️ Высокое (800px)', async (ctx) => {
-    const userId = ctx.from.id;
-    const state = userStates.get(userId);
-    if (state?.awaitingQuality) {
-        // Проверяем доступность High качества
-        const user = await database_1.database.getUser(userId);
-        if (!user || user.premiumHighAvailable <= 0) {
-            await ctx.reply(`❌ У вас нет доступных QR-кодов высокого качества (800x800px)\n\n` +
-                `Ваш баланс: ${user?.premiumHighAvailable || 0} шт.\n\n` +
-                `💳 Чтобы получить доступ, используйте команду /pay\n\n` +
-                `📱 Или выберите бесплатное качество (400x400px)`, telegraf_1.Markup.keyboard([
-                ['📱 Стандартное (400px)', '🎨 Ультра (1600px)'],
+    try {
+        const userId = ctx.from.id;
+        const state = userStates.get(userId);
+        if (state?.awaitingQuality) {
+            // Проверяем доступность High качества
+            const user = await database_1.database.getUser(userId);
+            if (!user || user.premiumHighAvailable <= 0) {
+                await ctx.reply(`❌ У вас нет доступных QR-кодов высокого качества (800x800px)\n\n` +
+                    `Ваш баланс: ${user?.premiumHighAvailable || 0} шт.\n\n` +
+                    `💳 Чтобы получить доступ, используйте команду /pay\n\n` +
+                    `📱 Или выберите бесплатное качество (400x400px)`, telegraf_1.Markup.keyboard([
+                    ['📱 Стандартное (400px)', '🎨 Ультра (1600px)'],
+                    ['🔙 Отменить']
+                ]).resize());
+                return;
+            }
+            state.awaitingQuality = false;
+            state.awaitingChoice = true;
+            state.quality = 'high';
+            userStates.set(userId, state);
+            await ctx.reply(`✅ Есть доступ! (Осталось: ${user.premiumHighAvailable} шт.)\n\nВыбери тип QR-кода:`, telegraf_1.Markup.keyboard([
+                ['✅ С логотипом'],
+                ['❌ Без логотипа'],
                 ['🔙 Отменить']
             ]).resize());
-            return;
         }
-        state.awaitingQuality = false;
-        state.awaitingChoice = true;
-        state.quality = 'high';
-        userStates.set(userId, state);
-        await ctx.reply(`✅ Есть доступ! (Осталось: ${user.premiumHighAvailable} шт.)\n\nВыбери тип QR-кода:`, telegraf_1.Markup.keyboard([
-            ['✅ С логотипом'],
-            ['❌ Без логотипа'],
-            ['🔙 Отменить']
-        ]).resize());
+    }
+    catch (error) {
+        console.error('Error in высокое качество handler:', error);
+        await ctx.reply('Произошла ошибка. Попробуйте еще раз.');
     }
 });
 bot.hears('🎨 Ультра (1600px)', async (ctx) => {
-    const userId = ctx.from.id;
-    const state = userStates.get(userId);
-    if (state?.awaitingQuality) {
-        // Проверяем доступность Ultra качества
-        const user = await database_1.database.getUser(userId);
-        if (!user || user.premiumUltraAvailable <= 0) {
-            await ctx.reply(`❌ У вас нет доступных QR-кодов ультра качества (1600x1600px)\n\n` +
-                `Ваш баланс: ${user?.premiumUltraAvailable || 0} шт.\n\n` +
-                `💳 Чтобы получить доступ, используйте команду /pay\n\n` +
-                `📱 Или выберите другое качество`, telegraf_1.Markup.keyboard([
-                ['📱 Стандартное (400px)', '🖥️ Высокое (800px)'],
+    try {
+        const userId = ctx.from.id;
+        const state = userStates.get(userId);
+        if (state?.awaitingQuality) {
+            // Проверяем доступность Ultra качества
+            const user = await database_1.database.getUser(userId);
+            if (!user || user.premiumUltraAvailable <= 0) {
+                await ctx.reply(`❌ У вас нет доступных QR-кодов ультра качества (1600x1600px)\n\n` +
+                    `Ваш баланс: ${user?.premiumUltraAvailable || 0} шт.\n\n` +
+                    `💳 Чтобы получить доступ, используйте команду /pay\n\n` +
+                    `📱 Или выберите другое качество`, telegraf_1.Markup.keyboard([
+                    ['📱 Стандартное (400px)', '🖥️ Высокое (800px)'],
+                    ['🔙 Отменить']
+                ]).resize());
+                return;
+            }
+            state.awaitingQuality = false;
+            state.awaitingChoice = true;
+            state.quality = 'ultra';
+            userStates.set(userId, state);
+            await ctx.reply(`✅ Есть доступ! (Осталось: ${user.premiumUltraAvailable} шт.)\n\nВыбери тип QR-кода:`, telegraf_1.Markup.keyboard([
+                ['✅ С логотипом'],
+                ['❌ Без логотипа'],
                 ['🔙 Отменить']
             ]).resize());
-            return;
         }
-        state.awaitingQuality = false;
-        state.awaitingChoice = true;
-        state.quality = 'ultra';
-        userStates.set(userId, state);
-        await ctx.reply(`✅ Есть доступ! (Осталось: ${user.premiumUltraAvailable} шт.)\n\nВыбери тип QR-кода:`, telegraf_1.Markup.keyboard([
-            ['✅ С логотипом'],
-            ['❌ Без логотипа'],
-            ['🔙 Отменить']
-        ]).resize());
+    }
+    catch (error) {
+        console.error('Error in ультра качество handler:', error);
+        await ctx.reply('Произошла ошибка. Попробуйте еще раз.');
     }
 });
 // Обработка нажатия кнопки "С логотипом"
 bot.hears('✅ С логотипом', async (ctx) => {
-    const userId = ctx.from.id;
-    const state = userStates.get(userId);
-    if (state?.awaitingChoice) {
-        state.awaitingChoice = false;
-        state.awaitingLogo = true;
-        state.awaitingUrl = false;
-        userStates.set(userId, state);
-        await ctx.reply('Отправь логотип в формате SVG.', telegraf_1.Markup.keyboard([
-            ['🔙 Отменить']
-        ]).resize());
+    try {
+        const userId = ctx.from.id;
+        const state = userStates.get(userId);
+        if (state?.awaitingChoice) {
+            state.awaitingChoice = false;
+            state.awaitingLogo = true;
+            state.awaitingUrl = false;
+            userStates.set(userId, state);
+            await ctx.reply('Отправь логотип в формате SVG.', telegraf_1.Markup.keyboard([
+                ['🔙 Отменить']
+            ]).resize());
+        }
+    }
+    catch (error) {
+        console.error('Error in С логотипом handler:', error);
+        await ctx.reply('Произошла ошибка. Попробуйте еще раз.');
     }
 });
 // Обработка нажатия кнопки "Без логотипа"
 bot.hears('❌ Без логотипа', async (ctx) => {
-    const userId = ctx.from.id;
-    const state = userStates.get(userId);
-    if (state?.awaitingChoice) {
-        state.awaitingChoice = false;
-        state.awaitingLogo = false;
-        state.awaitingUrl = true;
-        userStates.set(userId, state);
-        const qualityText = state.quality === 'ultra' ? 'ультра' :
-            state.quality === 'high' ? 'высоком' : 'стандартном';
-        await ctx.reply(`Пришли ссылку или текст для QR-кода в ${qualityText} качестве.`, telegraf_1.Markup.keyboard([
-            ['🔙 Отменить']
-        ]).resize());
+    try {
+        const userId = ctx.from.id;
+        const state = userStates.get(userId);
+        if (state?.awaitingChoice) {
+            state.awaitingChoice = false;
+            state.awaitingLogo = false;
+            state.awaitingUrl = true;
+            userStates.set(userId, state);
+            const qualityText = state.quality === 'ultra' ? 'ультра' :
+                state.quality === 'high' ? 'высоком' : 'стандартном';
+            await ctx.reply(`Пришли ссылку или текст для QR-кода в ${qualityText} качестве.`, telegraf_1.Markup.keyboard([
+                ['🔙 Отменить']
+            ]).resize());
+        }
+    }
+    catch (error) {
+        console.error('Error in Без логотипа handler:', error);
+        await ctx.reply('Произошла ошибка. Попробуйте еще раз.');
     }
 });
 // Обработка кнопки "Обратиться в техподдержку"
 bot.hears('📝 Обратиться в техподдержку', async (ctx) => {
-    const userId = ctx.from.id;
-    userStates.set(userId, {
-        awaitingChoice: false,
-        awaitingLogo: false,
-        awaitingUrl: false,
-        awaitingQuality: false,
-        awaitingRenderSettings: false,
-        awaitingSupportMessage: true
-    });
-    await ctx.reply('✍️ Напишите ваш вопрос или сообщение для техподдержки.\n\n' +
-        'Мы ответим вам в ближайшее время.', telegraf_1.Markup.keyboard([
-        ['🔙 Отменить']
-    ]).resize());
+    try {
+        const userId = ctx.from.id;
+        userStates.set(userId, {
+            awaitingChoice: false,
+            awaitingLogo: false,
+            awaitingUrl: false,
+            awaitingQuality: false,
+            awaitingRenderSettings: false,
+            awaitingSupportMessage: true
+        });
+        await ctx.reply('✍️ Напишите ваш вопрос или сообщение для техподдержки.\n\n' +
+            'Мы ответим вам в ближайшее время.', telegraf_1.Markup.keyboard([
+            ['🔙 Отменить']
+        ]).resize());
+    }
+    catch (error) {
+        console.error('Error in техподдержка handler:', error);
+        await ctx.reply('Произошла ошибка. Попробуйте еще раз.');
+    }
 });
 // Обработка нажатия кнопки "Отменить"
 bot.hears('🔙 Отменить', async (ctx) => {
-    const userId = ctx.from.id;
-    userStates.delete(userId);
-    await ctx.reply('✅ Операция отменена.', telegraf_1.Markup.keyboard([
-        ['🔄 Создать QR-код']
-    ]).resize());
+    try {
+        const userId = ctx.from.id;
+        userStates.delete(userId);
+        await ctx.reply('✅ Операция отменена.', telegraf_1.Markup.keyboard([
+            ['⚡ Создать QR-код']
+        ]).resize());
+    }
+    catch (error) {
+        console.error('Error in Отменить handler:', error);
+        await ctx.reply('Произошла ошибка. Попробуйте еще раз.');
+    }
 });
 // Обработка получения фото
 bot.on('photo', async (ctx) => {
@@ -902,31 +984,9 @@ bot.on((0, filters_1.message)('text'), async (ctx) => {
     const userId = ctx.from.id;
     const state = userStates.get(userId);
     const text = ctx.message.text;
-    // Логируем ВСЕ сообщения для отладки
-    console.log('\n📨 Получено сообщение:');
-    console.log(`👤 User ID: ${ctx.from.id}`);
-    console.log(`👤 Username: @${ctx.from.username || 'unknown'}`);
-    console.log(`👤 Name: ${ctx.from.first_name || ''} ${ctx.from.last_name || ''}`);
-    console.log(`💬 Message: ${text}`);
-    console.log(`🆔 Chat ID: ${ctx.chat.id}`);
-    console.log(`📅 Time: ${new Date().toLocaleString('ru-RU')}`);
-    console.log(`🔧 ADMIN_CHAT_ID: ${process.env.ADMIN_CHAT_ID || 'НЕ УСТАНОВЛЕН'}\n`);
-    // Логируем все сообщения в админ-чат
-    const adminChatId = process.env.ADMIN_CHAT_ID;
-    if (adminChatId && ctx.chat.id.toString() === adminChatId) {
-        console.log('✅ ЭТО АДМИН-ЧАТ!');
-    }
     // Обработка сообщений в техподдержку
     if (state?.awaitingSupportMessage) {
         const adminChatId = process.env.ADMIN_CHAT_ID ? process.env.ADMIN_CHAT_ID : null;
-        // Логируем информацию о пользователе и чате
-        console.log('\n📩 Новое сообщение в техподдержку:');
-        console.log(`👤 User ID: ${userId}`);
-        console.log(`👤 Username: @${ctx.from.username || 'unknown'}`);
-        console.log(`👤 Name: ${ctx.from.first_name || ''} ${ctx.from.last_name || ''}`);
-        console.log(`💬 Message: ${text}`);
-        console.log(`🆔 Chat ID: ${ctx.chat.id}`);
-        console.log(`📅 Time: ${new Date().toLocaleString('ru-RU')}\n`);
         if (adminChatId) {
             try {
                 // Отправляем сообщение в админ-чат
@@ -942,7 +1002,7 @@ bot.on((0, filters_1.message)('text'), async (ctx) => {
                 // Подтверждаем пользователю
                 await ctx.reply('✅ Ваше сообщение отправлено в техподдержку!\n\n' +
                     'Мы ответим вам в ближайшее время.', telegraf_1.Markup.keyboard([
-                    ['🔄 Создать QR-код']
+                    ['⚡ Создать QR-код']
                 ]).resize());
                 userStates.delete(userId);
             }
@@ -953,7 +1013,7 @@ bot.on((0, filters_1.message)('text'), async (ctx) => {
         }
         else {
             await ctx.reply('✅ Ваше сообщение зарегистрировано. Мы ответим вам в ближайшее время.', telegraf_1.Markup.keyboard([
-                ['🔄 Создать QR-код']
+                ['⚡ Создать QR-код']
             ]).resize());
             userStates.delete(userId);
         }
@@ -1025,7 +1085,7 @@ bot.on((0, filters_1.message)('text'), async (ctx) => {
             // Обновляем клавиатуру, убирая кнопку "Отменить"
             await ctx.reply(`✅ QR-код успешно создан (${qualityName})!\n\n` +
                 `${qualityEmoji} Осталось: ${remaining} шт.`, telegraf_1.Markup.keyboard([
-                ['🔄 Создать QR-код']
+                ['⚡ Создать QR-код']
             ]).resize());
             // Удаляем QR-файл сразу после отправки
             if (fs.existsSync(qrCodePath)) {
