@@ -113,7 +113,7 @@ async function generateQRWithLogo(
 
     const settings = qualitySettings[quality];
     const { qrSize, margin, logoSize, padding } = settings;
-    const whiteCircleRadius = (logoSize + padding * 2) / 2;
+    const whiteCircleRadius = (logoSize + padding * 2) / 2 * 0.85; // Уменьшено на 15%
     
     // Применяем настройки рендеринга или используем значения по умолчанию
     const roundedRadius = renderSettings?.roundedRadius ?? 0;
@@ -640,19 +640,34 @@ bot.on(message('text'), async (ctx) => {
             // Отправляем QR-код
             await ctx.replyWithPhoto({ source: qrCodePath });
 
-            // Удаляем файл через 5 минут
-            setTimeout(() => {
-                if (fs.existsSync(qrCodePath)) {
-                    try {
-                        fs.unlinkSync(qrCodePath);
-                    } catch (error) {
-                        console.error(`Ошибка при удалении файла ${qrCodePath}:`, error);
-                    }
-                }
-            }, 5 * 60 * 1000);
-
             // Очищаем состояние пользователя
             userStates.delete(userId);
+
+            // Обновляем клавиатуру, убирая кнопку "Отменить"
+            await ctx.reply(
+                '✅ QR-код успешно создан!',
+                Markup.keyboard([
+                    ['🔄 Создать QR-код']
+                ]).resize()
+            );
+
+            // Удаляем QR-файл сразу после отправки
+            if (fs.existsSync(qrCodePath)) {
+                try {
+                    fs.unlinkSync(qrCodePath);
+                } catch (error) {
+                    console.error(`Ошибка при удалении QR-файла ${qrCodePath}:`, error);
+                }
+            }
+
+            // Удаляем логотип, если он был использован
+            if (state.logoPath && fs.existsSync(state.logoPath)) {
+                try {
+                    fs.unlinkSync(state.logoPath);
+                } catch (error) {
+                    console.error(`Ошибка при удалении логотипа ${state.logoPath}:`, error);
+                }
+            }
 
         } catch (error) {
             console.error('Error generating QR code:', error);
