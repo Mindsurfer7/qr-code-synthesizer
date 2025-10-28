@@ -18,18 +18,33 @@ if (!process.env.BOT_TOKEN) {
     process.exit(1);
 }
 
+// Интерфейс для настроек рендеринга
+interface RenderSettings {
+    roundedRadius: number;    // Скругление углов модулей (0 = квадраты)
+    moduleStyle: 'square' | 'diamond' | 'circle'; // Стиль модулей
+}
+
 // Интерфейс для хранения состояния пользователя
 interface UserState {
     awaitingChoice: boolean;  // ожидаем выбор между "С логотипом" или "Без логотипа"
     awaitingLogo: boolean;   // ожидаем логотип
     awaitingUrl: boolean;     // ожидаем ссылку
     awaitingQuality: boolean; // ожидаем выбор качества
+    awaitingRenderSettings: boolean; // ожидаем настройки рендеринга
     logoPath?: string;
     quality?: 'standard' | 'high' | 'ultra';
+    renderSettings?: RenderSettings; // Настройки рендеринга
 }
 
 // Хранилище состояний пользователей
 const userStates = new Map<number, UserState>();
+
+// Предустановленные настройки рендеринга
+const renderSettingsPresets: Record<string, RenderSettings> = {
+    'Квадраты': { roundedRadius: 0, moduleStyle: 'square' },
+    'Скругленные': { roundedRadius: 8, moduleStyle: 'square' },
+    'Круглые': { roundedRadius: 0, moduleStyle: 'circle' }
+};
 
 // Функция для очистки папки temp
 function cleanupTempFolder() {
@@ -75,7 +90,12 @@ async function downloadFile(url: string, filePath: string): Promise<void> {
 }
 
 // Функция для создания QR-кода с логотипом
-async function generateQRWithLogo(url: string, logoPath?: string, quality: 'standard' | 'high' | 'ultra' = 'high'): Promise<string> {
+async function generateQRWithLogo(
+    url: string, 
+    logoPath?: string, 
+    quality: 'standard' | 'high' | 'ultra' = 'high',
+    renderSettings?: RenderSettings
+): Promise<string> {
     const tempDir = path.join(__dirname, 'temp');
     if (!fs.existsSync(tempDir)) {
         fs.mkdirSync(tempDir);
@@ -86,14 +106,18 @@ async function generateQRWithLogo(url: string, logoPath?: string, quality: 'stan
 
     // Настройки качества
     const qualitySettings = {
-        standard: { qrSize: 400, margin: 20, logoSize: 100, padding: 25, roundedRadius: 0 },
-        high: { qrSize: 800, margin: 40, logoSize: 200, padding: 50, roundedRadius: 0 },
-        ultra: { qrSize: 1600, margin: 80, logoSize: 400, padding: 100, roundedRadius: 0 }
+        standard: { qrSize: 400, margin: 20, logoSize: 100, padding: 25 },
+        high: { qrSize: 800, margin: 40, logoSize: 200, padding: 50 },
+        ultra: { qrSize: 1600, margin: 80, logoSize: 400, padding: 100 }
     };
 
     const settings = qualitySettings[quality];
-    const { qrSize, margin, logoSize, padding, roundedRadius } = settings;
+    const { qrSize, margin, logoSize, padding } = settings;
     const whiteCircleRadius = (logoSize + padding * 2) / 2;
+    
+    // Применяем настройки рендеринга или используем значения по умолчанию
+    const roundedRadius = renderSettings?.roundedRadius ?? 0;
+    const moduleStyle = renderSettings?.moduleStyle ?? 'square';
 
     // Получаем матрицу QR-кода через низкоуровневый API
     const qr = qrcode.create(url, {
@@ -115,6 +139,18 @@ async function generateQRWithLogo(url: string, logoPath?: string, quality: 'stan
     const centerX = moduleCount / 2;
     const centerY = moduleCount / 2;
 
+    // Функция для рендеринга модуля
+    function renderModule(x: number, y: number, isDark: boolean, color: string): string {
+        if (moduleStyle === 'circle') {
+            // Круглые модули
+            const radius = cellSize / 2 * 0.9; // 90% размера для красоты
+            return `<circle cx="${x + cellSize / 2}" cy="${y + cellSize / 2}" r="${radius}" fill="${color}"/>`;
+        } else {
+            // Квадратные модули (с опциональным скруглением)
+            return `<rect x="${x}" y="${y}" width="${cellSize}" height="${cellSize}" rx="${roundedRadius}" ry="${roundedRadius}" fill="${color}"/>`;
+        }
+    }
+
     for (let row = 0; row < moduleCount; row++) {
         for (let col = 0; col < moduleCount; col++) {
             const isDark = qr.modules.get(row, col);
@@ -129,9 +165,9 @@ async function generateQRWithLogo(url: string, logoPath?: string, quality: 'stan
             
             // Если модуль находится внутри круга для логотипа, делаем его белым
             if (distance < whiteCircleRadius) {
-                svgString += `<rect x="${x}" y="${y}" width="${cellSize}" height="${cellSize}" fill="#ffffff"/>`;
+                svgString += renderModule(x, y, false, '#ffffff');
             } else {
-                svgString += `<rect x="${x}" y="${y}" width="${cellSize}" height="${cellSize}" fill="${isDark ? '#000000' : '#ffffff'}"/>`;
+                svgString += renderModule(x, y, false, isDark ? '#000000' : '#ffffff');
             }
         }
     }
@@ -222,13 +258,15 @@ bot.command('start', async (ctx) => {
 
 📝 Как использовать:
 1. Используйте команду /create или нажмите кнопку "Создать QR-код"
-2. Выберите качество: стандартное, высокое или ультра
-3. Выберите тип QR-кода: с логотипом или без
-4. Если вы выбрали с логотипом - отправьте логотип в формате SVG
-5. Отправьте ссылку
-6. Получите готовый высококачественный QR-код
+2. Выберите стиль модулей: квадраты, скругленные или круглые
+3. Выберите качество: стандартное, высокое или ультра
+4. Выберите тип QR-кода: с логотипом или без
+5. Если вы выбрали с логотипом - отправьте логотип в формате SVG
+6. Отправьте ссылку
+7. Получите готовый высококачественный QR-код
 
 ✨ Особенности:
+- Различные стили модулей (квадраты, скругленные, круглые)
 - Поддержка разных уровней качества (до 1600x1600px)
 - Четкие края без размытия
 - Оптимизированное качество изображения
@@ -248,13 +286,13 @@ bot.command('start', async (ctx) => {
 // Обработка команды /create
 bot.command('create', async (ctx) => {
     const userId = ctx.from.id;
-    userStates.set(userId, { awaitingChoice: false, awaitingLogo: false, awaitingUrl: false, awaitingQuality: true });
+    userStates.set(userId, { awaitingChoice: false, awaitingLogo: false, awaitingUrl: false, awaitingQuality: false, awaitingRenderSettings: true });
 
     await ctx.reply(
-        'Выбери качество QR-кода:',
+        'Выбери стиль модулей QR-кода:',
         Markup.keyboard([
-            ['📱 Стандартное (400px)', '🖥️ Высокое (800px)'],
-            ['🎨 Ультра (1600px)'],
+            ['Квадраты', 'Скругленные'],
+            ['Круглые'],
             ['🔙 Отменить']
         ]).resize()
     );
@@ -279,11 +317,17 @@ bot.command('help', async (ctx) => {
 📝 Справка по использованию бота:
 
 1. Нажмите кнопку "Создать QR-код" или команду /create
-2. Выберите качество: стандартное (400px), высокое (800px) или ультра (1600px)
-3. Выберите тип QR-кода: с логотипом или без
-4. Если вы выбрали с логотипом - отправьте логотип в формате SVG
-5. Отправьте ссылку или текст для QR-кода
-6. Получите готовый высококачественный QR-код
+2. Выберите стиль модулей: Квадраты, Скругленные или Круглые
+3. Выберите качество: стандартное (400px), высокое (800px) или ультра (1600px)
+4. Выберите тип QR-кода: с логотипом или без
+5. Если вы выбрали с логотипом - отправьте логотип в формате SVG
+6. Отправьте ссылку или текст для QR-кода
+7. Получите готовый высококачественный QR-код
+
+✨ Стили модулей:
+- Квадраты: классические угловатые модули
+- Скругленные: квадраты со скругленными углами
+- Круглые: круглые модули
 
 ✨ Уровни качества:
 - 📱 Стандартное: 400x400px, быстрое создание
@@ -303,16 +347,80 @@ bot.command('help', async (ctx) => {
 // Обработка нажатия кнопки "Создать QR-код"
 bot.hears('🔄 Создать QR-код', async (ctx) => {
     const userId = ctx.from.id;
-    userStates.set(userId, { awaitingChoice: false, awaitingLogo: false, awaitingUrl: false, awaitingQuality: true });
+    userStates.set(userId, { awaitingChoice: false, awaitingLogo: false, awaitingUrl: false, awaitingQuality: false, awaitingRenderSettings: true });
 
     await ctx.reply(
-        'Выбери качество QR-кода:',
+        'Выбери стиль модулей QR-кода:',
         Markup.keyboard([
-            ['📱 Стандартное (400px)', '🖥️ Высокое (800px)'],
-            ['🎨 Ультра (1600px)'],
+            ['Квадраты', 'Скругленные'],
+            ['Круглые'],
             ['🔙 Отменить']
         ]).resize()
     );
+});
+
+// Обработка выбора стиля рендеринга
+bot.hears('Квадраты', async (ctx) => {
+    const userId = ctx.from.id;
+    const state = userStates.get(userId);
+    
+    if (state?.awaitingRenderSettings) {
+        state.renderSettings = renderSettingsPresets['Квадраты'];
+        state.awaitingRenderSettings = false;
+        state.awaitingQuality = true;
+        userStates.set(userId, state);
+
+        await ctx.reply(
+            'Выбери качество QR-кода:',
+            Markup.keyboard([
+                ['📱 Стандартное (400px)', '🖥️ Высокое (800px)'],
+                ['🎨 Ультра (1600px)'],
+                ['🔙 Отменить']
+            ]).resize()
+        );
+    }
+});
+
+bot.hears('Скругленные', async (ctx) => {
+    const userId = ctx.from.id;
+    const state = userStates.get(userId);
+    
+    if (state?.awaitingRenderSettings) {
+        state.renderSettings = renderSettingsPresets['Скругленные'];
+        state.awaitingRenderSettings = false;
+        state.awaitingQuality = true;
+        userStates.set(userId, state);
+
+        await ctx.reply(
+            'Выбери качество QR-кода:',
+            Markup.keyboard([
+                ['📱 Стандартное (400px)', '🖥️ Высокое (800px)'],
+                ['🎨 Ультра (1600px)'],
+                ['🔙 Отменить']
+            ]).resize()
+        );
+    }
+});
+
+bot.hears('Круглые', async (ctx) => {
+    const userId = ctx.from.id;
+    const state = userStates.get(userId);
+    
+    if (state?.awaitingRenderSettings) {
+        state.renderSettings = renderSettingsPresets['Круглые'];
+        state.awaitingRenderSettings = false;
+        state.awaitingQuality = true;
+        userStates.set(userId, state);
+
+        await ctx.reply(
+            'Выбери качество QR-кода:',
+            Markup.keyboard([
+                ['📱 Стандартное (400px)', '🖥️ Высокое (800px)'],
+                ['🎨 Ультра (1600px)'],
+                ['🔙 Отменить']
+            ]).resize()
+        );
+    }
 });
 
 // Обработка выбора качества
@@ -526,7 +634,8 @@ bot.on(message('text'), async (ctx) => {
 
         try {
             const quality = state.quality || 'high';
-            const qrCodePath = await generateQRWithLogo(processedUrl, state.logoPath, quality);
+            const renderSettings = state.renderSettings;
+            const qrCodePath = await generateQRWithLogo(processedUrl, state.logoPath, quality, renderSettings);
             
             // Отправляем QR-код
             await ctx.replyWithPhoto({ source: qrCodePath });
