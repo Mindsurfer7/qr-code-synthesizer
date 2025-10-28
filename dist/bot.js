@@ -101,23 +101,46 @@ async function generateQRWithLogo(url, logoPath) {
     }
     const unique = `${Date.now()}_${Math.floor(Math.random() * 100000)}`;
     const qrCodePath = path.join(tempDir, `${unique}_qr.png`);
-    const qrWithLogoPath = path.join(tempDir, `${unique}_qr_logo.png`);
     const qrFinalPath = path.join(tempDir, `${unique}_qr_final.png`);
     // Размеры
     const qrSize = 400;
     const logoSize = 100;
     const padding = 25; // Паддинг вокруг логотипа
-    const whiteBoxSize = logoSize + padding * 2;
-    // Генерируем QR-код с максимальной коррекцией ошибок
-    await qrcode.toFile(qrCodePath, url, {
-        width: qrSize,
-        margin: 2,
-        errorCorrectionLevel: 'H',
-        color: {
-            dark: '#000000',
-            light: '#ffffff'
-        }
+    const whiteCircleRadius = (logoSize + padding * 2) / 2;
+    // Получаем матрицу QR-кода через низкоуровневый API
+    const qr = qrcode.create(url, {
+        errorCorrectionLevel: 'H'
     });
+    const moduleCount = qr.modules.size;
+    // Создаем SVG с модифицированной матрицей (без паттернов в центре)
+    let svgString = `<svg width="${qrSize}" height="${qrSize}" xmlns="http://www.w3.org/2000/svg">`;
+    const cellSize = qrSize / moduleCount;
+    const centerX = moduleCount / 2;
+    const centerY = moduleCount / 2;
+    for (let row = 0; row < moduleCount; row++) {
+        for (let col = 0; col < moduleCount; col++) {
+            const isDark = qr.modules.get(row, col);
+            const x = col * cellSize;
+            const y = row * cellSize;
+            // Вычисляем расстояние от центра до текущего модуля
+            const dx = (col - centerX) * cellSize;
+            const dy = (row - centerY) * cellSize;
+            const distance = Math.sqrt(dx * dx + dy * dy);
+            // Если модуль находится внутри круга для логотипа, делаем его белым
+            if (distance < whiteCircleRadius) {
+                svgString += `<rect x="${x}" y="${y}" width="${cellSize}" height="${cellSize}" fill="#ffffff"/>`;
+            }
+            else {
+                svgString += `<rect x="${x}" y="${y}" width="${cellSize}" height="${cellSize}" fill="${isDark ? '#000000' : '#ffffff'}"/>`;
+            }
+        }
+    }
+    svgString += '</svg>';
+    // Конвертируем SVG в PNG
+    const svgBuffer = Buffer.from(svgString);
+    const pngBuffer = await (0, sharp_1.default)(svgBuffer).png().toBuffer();
+    fs.writeFileSync(qrCodePath, pngBuffer);
+    // Если есть логотип, накладываем его
     if (logoPath) {
         try {
             let logoBuffer;
@@ -128,22 +151,8 @@ async function generateQRWithLogo(url, logoPath) {
             else {
                 logoBuffer = fs.readFileSync(logoPath);
             }
-            // Вырезаем белый круг в центре QR-кода
-            const qrImage = (0, sharp_1.default)(qrCodePath);
-            const whiteCircle = Buffer.from(`<svg width='${whiteBoxSize}' height='${whiteBoxSize}'>
-                    <circle cx='${whiteBoxSize / 2}' cy='${whiteBoxSize / 2}' r='${whiteBoxSize / 2}' fill='white' />
-                </svg>`);
-            await qrImage
-                .composite([
-                {
-                    input: whiteCircle,
-                    top: Math.floor((qrSize - whiteBoxSize) / 2),
-                    left: Math.floor((qrSize - whiteBoxSize) / 2)
-                }
-            ])
-                .toFile(qrWithLogoPath);
-            // Теперь накладываем логотип на белый круг, сохраняем в финальный файл
-            await (0, sharp_1.default)(qrWithLogoPath)
+            // Накладываем логотип в центр QR-кода
+            await (0, sharp_1.default)(qrCodePath)
                 .composite([
                 {
                     input: logoBuffer,
@@ -152,9 +161,8 @@ async function generateQRWithLogo(url, logoPath) {
                 }
             ])
                 .toFile(qrFinalPath);
-            // Удаляем промежуточные файлы
+            // Удаляем промежуточный файл
             fs.unlinkSync(qrCodePath);
-            fs.unlinkSync(qrWithLogoPath);
             return qrFinalPath;
         }
         catch (error) {
