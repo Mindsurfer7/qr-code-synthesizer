@@ -104,6 +104,7 @@ async function generateQRWithLogo(url, logoPath) {
     const qrFinalPath = path.join(tempDir, `${unique}_qr_final.png`);
     // Размеры
     const qrSize = 400;
+    const margin = 20; // Белое пространство вокруг QR-кода
     const logoSize = 100;
     const padding = 25; // Паддинг вокруг логотипа
     const whiteCircleRadius = (logoSize + padding * 2) / 2;
@@ -112,16 +113,21 @@ async function generateQRWithLogo(url, logoPath) {
         errorCorrectionLevel: 'H'
     });
     const moduleCount = qr.modules.size;
+    // Размер QR-кода без margin (внутренняя область)
+    const qrContentSize = qrSize - (margin * 2);
     // Создаем SVG с модифицированной матрицей (без паттернов в центре)
     let svgString = `<svg width="${qrSize}" height="${qrSize}" xmlns="http://www.w3.org/2000/svg">`;
-    const cellSize = qrSize / moduleCount;
+    // Добавляем белый фон
+    svgString += `<rect x="0" y="0" width="${qrSize}" height="${qrSize}" fill="#ffffff"/>`;
+    const cellSize = qrContentSize / moduleCount;
     const centerX = moduleCount / 2;
     const centerY = moduleCount / 2;
     for (let row = 0; row < moduleCount; row++) {
         for (let col = 0; col < moduleCount; col++) {
             const isDark = qr.modules.get(row, col);
-            const x = col * cellSize;
-            const y = row * cellSize;
+            // Сдвигаем координаты на margin
+            const x = col * cellSize + margin;
+            const y = row * cellSize + margin;
             // Вычисляем расстояние от центра до текущего модуля
             const dx = (col - centerX) * cellSize;
             const dy = (row - centerY) * cellSize;
