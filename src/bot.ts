@@ -32,6 +32,7 @@ interface UserState {
     awaitingUrl: boolean;     // ожидаем ссылку
     awaitingQuality: boolean; // ожидаем выбор качества
     awaitingRenderSettings: boolean; // ожидаем настройки рендеринга
+    awaitingSupportMessage: boolean; // ожидаем сообщение в поддержку
     logoPath?: string;
     quality?: 'standard' | 'high' | 'ultra';
     renderSettings?: RenderSettings; // Настройки рендеринга
@@ -234,10 +235,12 @@ async function setupCommands() {
     try {
         await bot.telegram.setMyCommands([
             { command: 'start', description: '🚀 Запустить бота и показать приветствие' },
-            { command: 'create', description: '🔄 Создать высококачественный QR-код' },
+            { command: 'create', description: '⚡ Создать высококачественный QR-код' },
             { command: 'balance', description: '📊 Посмотреть баланс доступных QR-кодов' },
             { command: 'pay', description: '💳 Оплатить премиум-возможности' },
             { command: 'help', description: '📖 Показать справку по использованию бота' },
+            { command: 'support', description: '🆘 Обратиться в техподдержку' },
+            { command: 'terms', description: '📋 Условия использования' },
             { command: 'cancel', description: '❌ Отменить текущую операцию' }
         ]);
         console.log('Menu commands set successfully');
@@ -257,6 +260,18 @@ setInterval(cleanupTempFolder, 6 * 60 * 60 * 1000);
 // Обработка команды /start
 bot.command('start', async (ctx) => {
     try {
+        // Логируем все сообщения в админ-чат
+        const adminChatId = process.env.ADMIN_CHAT_ID;
+        if (adminChatId && ctx.chat.id.toString() === adminChatId) {
+            console.log('\n🔔 Сообщение в админ-чате:');
+            console.log(`👤 User ID: ${ctx.from.id}`);
+            console.log(`👤 Username: @${ctx.from.username || 'unknown'}`);
+            console.log(`👤 Name: ${ctx.from.first_name || ''} ${ctx.from.last_name || ''}`);
+            console.log(`💬 Message: ${ctx.message.text}`);
+            console.log(`🆔 Chat ID: ${ctx.chat.id}`);
+            console.log(`📅 Time: ${new Date().toLocaleString('ru-RU')}\n`);
+        }
+
         // Создаем или получаем пользователя в БД
         const user = await database.getOrCreateUser(
             ctx.from.id,
@@ -297,7 +312,7 @@ bot.command('start', async (ctx) => {
     `;
 
         await ctx.reply(welcomeMessage, Markup.keyboard([
-            ['🔄 Создать QR-код']
+            ['⚡ Создать QR-код']
         ]).resize());
     } catch (error) {
         console.error('Error in /start:', error);
@@ -308,7 +323,7 @@ bot.command('start', async (ctx) => {
 // Обработка команды /create
 bot.command('create', async (ctx) => {
     const userId = ctx.from.id;
-    userStates.set(userId, { awaitingChoice: false, awaitingLogo: false, awaitingUrl: false, awaitingQuality: false, awaitingRenderSettings: true });
+    userStates.set(userId, { awaitingChoice: false, awaitingLogo: false, awaitingUrl: false, awaitingQuality: false, awaitingRenderSettings: true, awaitingSupportMessage: false });
 
     await ctx.reply(
         'Выбери стиль модулей QR-кода:',
@@ -328,7 +343,7 @@ bot.command('cancel', async (ctx) => {
     await ctx.reply(
         '✅ Операция отменена.',
         Markup.keyboard([
-            ['🔄 Создать QR-код']
+            ['⚡ Создать QR-код']
         ]).resize()
     );
 });
@@ -603,15 +618,25 @@ bot.command('paysupport', async (ctx) => {
     );
 });
 
-// Обработка команды /support (требование Telegram)
+// Обработка команды /support
 bot.command('support', async (ctx) => {
+    const userId = ctx.from.id;
+    const state = userStates.get(userId);
+    
+    // Если пользователь уже в состоянии поддержки, отменяем его
+    if (state?.awaitingSupportMessage) {
+        userStates.delete(userId);
+    }
+    
     await ctx.reply(
         '🆘 Служба поддержки\n\n' +
         'Чем мы можем помочь?\n\n' +
         '📋 По использованию бота: /help\n' +
-        '💳 По платежам: /paysupport\n' +
-        '📖 Условия использования: /terms\n\n' +
-        'Напишите ваш вопрос, и мы обязательно поможем!'
+        'Нажмите кнопку ниже, чтобы обратиться в техподдержку:',
+        Markup.keyboard([
+            ['📝 Обратиться в техподдержку'],
+            ['🔙 Отменить']
+        ]).resize()
     );
 });
 
@@ -682,8 +707,6 @@ bot.command('terms', async (ctx) => {
 
 1️⃣1️⃣ КОНТАКТЫ И ПОДДЕРЖКА
 Служба поддержки: /support
-Вопросы по платежам: /paysupport
-Email поддержки: support@qrbot.local
 
 1️⃣2️⃣ СОГЛАСИЕ
 Нажимая на команду /create, вы подтверждаете, что:
@@ -703,9 +726,9 @@ Email поддержки: support@qrbot.local
 
 
 // Обработка нажатия кнопки "Создать QR-код"
-bot.hears('🔄 Создать QR-код', async (ctx) => {
+bot.hears('⚡ Создать QR-код', async (ctx) => {
     const userId = ctx.from.id;
-    userStates.set(userId, { awaitingChoice: false, awaitingLogo: false, awaitingUrl: false, awaitingQuality: false, awaitingRenderSettings: true });
+    userStates.set(userId, { awaitingChoice: false, awaitingLogo: false, awaitingUrl: false, awaitingQuality: false, awaitingRenderSettings: true, awaitingSupportMessage: false });
 
     await ctx.reply(
         'Выбери стиль модулей QR-кода:',
@@ -922,6 +945,27 @@ bot.hears('❌ Без логотипа', async (ctx) => {
     }
 });
 
+// Обработка кнопки "Обратиться в техподдержку"
+bot.hears('📝 Обратиться в техподдержку', async (ctx) => {
+    const userId = ctx.from.id;
+    userStates.set(userId, { 
+        awaitingChoice: false, 
+        awaitingLogo: false, 
+        awaitingUrl: false, 
+        awaitingQuality: false, 
+        awaitingRenderSettings: false,
+        awaitingSupportMessage: true 
+    });
+
+    await ctx.reply(
+        '✍️ Напишите ваш вопрос или сообщение для техподдержки.\n\n' +
+        'Мы ответим вам в ближайшее время.',
+        Markup.keyboard([
+            ['🔙 Отменить']
+        ]).resize()
+    );
+});
+
 // Обработка нажатия кнопки "Отменить"
 bot.hears('🔙 Отменить', async (ctx) => {
     const userId = ctx.from.id;
@@ -930,7 +974,7 @@ bot.hears('🔙 Отменить', async (ctx) => {
     await ctx.reply(
         '✅ Операция отменена.',
         Markup.keyboard([
-            ['🔄 Создать QR-код']
+            ['⚡ Создать QR-код']
         ]).resize()
     );
 });
@@ -1014,6 +1058,81 @@ bot.on(message('text'), async (ctx) => {
     const state = userStates.get(userId);
     const text = ctx.message.text;
 
+    // Логируем ВСЕ сообщения для отладки
+    console.log('\n📨 Получено сообщение:');
+    console.log(`👤 User ID: ${ctx.from.id}`);
+    console.log(`👤 Username: @${ctx.from.username || 'unknown'}`);
+    console.log(`👤 Name: ${ctx.from.first_name || ''} ${ctx.from.last_name || ''}`);
+    console.log(`💬 Message: ${text}`);
+    console.log(`🆔 Chat ID: ${ctx.chat.id}`);
+    console.log(`📅 Time: ${new Date().toLocaleString('ru-RU')}`);
+    console.log(`🔧 ADMIN_CHAT_ID: ${process.env.ADMIN_CHAT_ID || 'НЕ УСТАНОВЛЕН'}\n`);
+
+    // Логируем все сообщения в админ-чат
+    const adminChatId = process.env.ADMIN_CHAT_ID;
+    if (adminChatId && ctx.chat.id.toString() === adminChatId) {
+        console.log('✅ ЭТО АДМИН-ЧАТ!');
+    }
+
+    // Обработка сообщений в техподдержку
+    if (state?.awaitingSupportMessage) {
+        const adminChatId = process.env.ADMIN_CHAT_ID ? process.env.ADMIN_CHAT_ID : null;
+        
+        // Логируем информацию о пользователе и чате
+        console.log('\n📩 Новое сообщение в техподдержку:');
+        console.log(`👤 User ID: ${userId}`);
+        console.log(`👤 Username: @${ctx.from.username || 'unknown'}`);
+        console.log(`👤 Name: ${ctx.from.first_name || ''} ${ctx.from.last_name || ''}`);
+        console.log(`💬 Message: ${text}`);
+        console.log(`🆔 Chat ID: ${ctx.chat.id}`);
+        console.log(`📅 Time: ${new Date().toLocaleString('ru-RU')}\n`);
+        
+        if (adminChatId) {
+            try {
+                // Отправляем сообщение в админ-чат
+                const userInfo = ctx.from.username 
+                    ? `@${ctx.from.username}` 
+                    : `${ctx.from.first_name || ''} ${ctx.from.last_name || ''}`.trim() || `ID: ${userId}`;
+                
+                await ctx.telegram.sendMessage(
+                    adminChatId,
+                    `📩 Новое сообщение из техподдержки\n\n` +
+                    `👤 От: ${userInfo} (ID: ${userId})\n` +
+                    `🆔 Chat ID: ${ctx.chat.id}\n` +
+                    `💬 Сообщение:\n${text}\n\n` +
+                    `---\n` +
+                    `Время: ${new Date().toLocaleString('ru-RU')}`
+                );
+                
+                // Подтверждаем пользователю
+                await ctx.reply(
+                    '✅ Ваше сообщение отправлено в техподдержку!\n\n' +
+                    'Мы ответим вам в ближайшее время.',
+                    Markup.keyboard([
+                        ['⚡ Создать QR-код']
+                    ]).resize()
+                );
+                
+                userStates.delete(userId);
+            } catch (error) {
+                console.error('Error sending support message:', error);
+                await ctx.reply(
+                    '❌ Произошла ошибка при отправке сообщения. Попробуйте еще раз позже.'
+                );
+            }
+        } else {
+            await ctx.reply(
+                '✅ Ваше сообщение зарегистрировано. Мы ответим вам в ближайшее время.',
+                Markup.keyboard([
+                    ['⚡ Создать QR-код']
+                ]).resize()
+            );
+            
+            userStates.delete(userId);
+        }
+        return;
+    }
+
     if (state?.awaitingUrl) {
         let processedUrl: string;
         try {
@@ -1091,7 +1210,7 @@ bot.on(message('text'), async (ctx) => {
                 `✅ QR-код успешно создан (${qualityName})!\n\n` +
                 `${qualityEmoji} Осталось: ${remaining} шт.`,
                 Markup.keyboard([
-                    ['🔄 Создать QR-код']
+                    ['⚡ Создать QR-код']
                 ]).resize()
             );
 
