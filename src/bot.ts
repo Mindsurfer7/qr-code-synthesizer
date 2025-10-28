@@ -50,18 +50,22 @@ const renderSettingsPresets: Record<string, RenderSettings> = {
 
 // Функция для очистки папки temp
 function cleanupTempFolder() {
-    const tempDir = path.join(__dirname, 'temp');
-    
-    if (fs.existsSync(tempDir)) {
-        const files = fs.readdirSync(tempDir);
-        for (const file of files) {
-            const filePath = path.join(tempDir, file);
-            try {
-                fs.unlinkSync(filePath);
-            } catch (error) {
-                console.error(`Ошибка при удалении файла ${filePath}:`, error);
+    try {
+        const tempDir = path.join(__dirname, 'temp');
+        
+        if (fs.existsSync(tempDir)) {
+            const files = fs.readdirSync(tempDir);
+            for (const file of files) {
+                const filePath = path.join(tempDir, file);
+                try {
+                    fs.unlinkSync(filePath);
+                } catch (error) {
+                    console.error(`Ошибка при удалении файла ${filePath}:`, error);
+                }
             }
         }
+    } catch (error) {
+        console.error('Ошибка при очистке папки temp:', error);
     }
 }
 
@@ -76,19 +80,24 @@ function processUrl(text: string): string {
 
 // Функция для скачивания файла
 async function downloadFile(url: string, filePath: string): Promise<void> {
-    const response = await axios({
-        method: 'GET',
-        url: url,
-        responseType: 'stream'
-    });
+    try {
+        const response = await axios({
+            method: 'GET',
+            url: url,
+            responseType: 'stream'
+        });
 
-    const writer = fs.createWriteStream(filePath);
-    response.data.pipe(writer);
+        const writer = fs.createWriteStream(filePath);
+        response.data.pipe(writer);
 
-    return new Promise((resolve, reject) => {
-        writer.on('finish', resolve);
-        writer.on('error', reject);
-    });
+        return new Promise((resolve, reject) => {
+            writer.on('finish', resolve);
+            writer.on('error', reject);
+        });
+    } catch (error) {
+        console.error('Error downloading file:', error);
+        throw new Error(`Failed to download file from ${url}`);
+    }
 }
 
 // Функция для создания QR-кода с логотипом
@@ -98,133 +107,138 @@ async function generateQRWithLogo(
     quality: 'standard' | 'high' | 'ultra' = 'high',
     renderSettings?: RenderSettings
 ): Promise<string> {
-    const tempDir = path.join(__dirname, 'temp');
-    if (!fs.existsSync(tempDir)) {
-        fs.mkdirSync(tempDir);
-    }
-    const unique = `${Date.now()}_${Math.floor(Math.random() * 100000)}`;
-    const qrCodePath = path.join(tempDir, `${unique}_qr.png`);
-    const qrFinalPath = path.join(tempDir, `${unique}_qr_final.png`);
-
-    // Настройки качества
-    const qualitySettings = {
-        standard: { qrSize: 400, margin: 20, logoSize: 100, padding: 25 },
-        high: { qrSize: 800, margin: 40, logoSize: 200, padding: 50 },
-        ultra: { qrSize: 1600, margin: 80, logoSize: 400, padding: 100 }
-    };
-
-    const settings = qualitySettings[quality];
-    const { qrSize, margin, logoSize, padding } = settings;
-    const whiteCircleRadius = (logoSize + padding * 2) / 2 * 0.85; // Уменьшено на 15%
-    
-    // Применяем настройки рендеринга или используем значения по умолчанию
-    const roundedRadius = renderSettings?.roundedRadius ?? 0;
-    const moduleStyle = renderSettings?.moduleStyle ?? 'square';
-
-    // Получаем матрицу QR-кода через низкоуровневый API
-    const qr = qrcode.create(url, {
-        errorCorrectionLevel: 'H'
-    });
-
-    const moduleCount = qr.modules.size;
-    
-    // Размер QR-кода без margin (внутренняя область)
-    const qrContentSize = qrSize - (margin * 2);
-    
-    // Создаем SVG с модифицированной матрицей (без паттернов в центре)
-    let svgString = `<svg width="${qrSize}" height="${qrSize}" xmlns="http://www.w3.org/2000/svg" shape-rendering="crispEdges" image-rendering="crisp-edges">`;
-    
-    // Добавляем белый фон
-    svgString += `<rect x="0" y="0" width="${qrSize}" height="${qrSize}" fill="#ffffff"/>`;
-    
-    const cellSize = qrContentSize / moduleCount;
-    const centerX = moduleCount / 2;
-    const centerY = moduleCount / 2;
-
-    // Функция для рендеринга модуля
-    function renderModule(x: number, y: number, isDark: boolean, color: string): string {
-        if (moduleStyle === 'circle') {
-            // Круглые модули
-            const radius = cellSize / 2 * 0.9; // 90% размера для красоты
-            return `<circle cx="${x + cellSize / 2}" cy="${y + cellSize / 2}" r="${radius}" fill="${color}"/>`;
-        } else {
-            // Квадратные модули (с опциональным скруглением)
-            return `<rect x="${x}" y="${y}" width="${cellSize}" height="${cellSize}" rx="${roundedRadius}" ry="${roundedRadius}" fill="${color}"/>`;
+    try {
+        const tempDir = path.join(__dirname, 'temp');
+        if (!fs.existsSync(tempDir)) {
+            fs.mkdirSync(tempDir);
         }
-    }
+        const unique = `${Date.now()}_${Math.floor(Math.random() * 100000)}`;
+        const qrCodePath = path.join(tempDir, `${unique}_qr.png`);
+        const qrFinalPath = path.join(tempDir, `${unique}_qr_final.png`);
 
-    for (let row = 0; row < moduleCount; row++) {
-        for (let col = 0; col < moduleCount; col++) {
-            const isDark = qr.modules.get(row, col);
-            // Сдвигаем координаты на margin
-            const x = col * cellSize + margin;
-            const y = row * cellSize + margin;
-            
-            // Вычисляем расстояние от центра до текущего модуля
-            const dx = (col - centerX) * cellSize;
-            const dy = (row - centerY) * cellSize;
-            const distance = Math.sqrt(dx * dx + dy * dy);
-            
-            // Если модуль находится внутри круга для логотипа, делаем его белым
-            if (distance < whiteCircleRadius) {
-                svgString += renderModule(x, y, false, '#ffffff');
+        // Настройки качества
+        const qualitySettings = {
+            standard: { qrSize: 400, margin: 20, logoSize: 100, padding: 25 },
+            high: { qrSize: 800, margin: 40, logoSize: 200, padding: 50 },
+            ultra: { qrSize: 1600, margin: 80, logoSize: 400, padding: 100 }
+        };
+
+        const settings = qualitySettings[quality];
+        const { qrSize, margin, logoSize, padding } = settings;
+        const whiteCircleRadius = (logoSize + padding * 2) / 2 * 0.85; // Уменьшено на 15%
+        
+        // Применяем настройки рендеринга или используем значения по умолчанию
+        const roundedRadius = renderSettings?.roundedRadius ?? 0;
+        const moduleStyle = renderSettings?.moduleStyle ?? 'square';
+
+        // Получаем матрицу QR-кода через низкоуровневый API
+        const qr = qrcode.create(url, {
+            errorCorrectionLevel: 'H'
+        });
+
+        const moduleCount = qr.modules.size;
+        
+        // Размер QR-кода без margin (внутренняя область)
+        const qrContentSize = qrSize - (margin * 2);
+        
+        // Создаем SVG с модифицированной матрицей (без паттернов в центре)
+        let svgString = `<svg width="${qrSize}" height="${qrSize}" xmlns="http://www.w3.org/2000/svg" shape-rendering="crispEdges" image-rendering="crisp-edges">`;
+        
+        // Добавляем белый фон
+        svgString += `<rect x="0" y="0" width="${qrSize}" height="${qrSize}" fill="#ffffff"/>`;
+        
+        const cellSize = qrContentSize / moduleCount;
+        const centerX = moduleCount / 2;
+        const centerY = moduleCount / 2;
+
+        // Функция для рендеринга модуля
+        function renderModule(x: number, y: number, isDark: boolean, color: string): string {
+            if (moduleStyle === 'circle') {
+                // Круглые модули
+                const radius = cellSize / 2 * 0.9; // 90% размера для красоты
+                return `<circle cx="${x + cellSize / 2}" cy="${y + cellSize / 2}" r="${radius}" fill="${color}"/>`;
             } else {
-                svgString += renderModule(x, y, false, isDark ? '#000000' : '#ffffff');
+                // Квадратные модули (с опциональным скруглением)
+                return `<rect x="${x}" y="${y}" width="${cellSize}" height="${cellSize}" rx="${roundedRadius}" ry="${roundedRadius}" fill="${color}"/>`;
             }
         }
-    }
-    svgString += '</svg>';
 
-    // Конвертируем SVG в PNG с высоким качеством
-    const svgBuffer = Buffer.from(svgString);
-    const pngBuffer = await sharp(svgBuffer)
-        .png({ 
-            quality: 100, 
-            compressionLevel: 0,
-            adaptiveFiltering: false,
-            force: true
-        })
-        .toBuffer();
-    fs.writeFileSync(qrCodePath, pngBuffer);
-
-    // Если есть логотип, накладываем его
-    if (logoPath) {
-        try {
-            let logoBuffer: Buffer;
-            if (logoPath.endsWith('.svg')) {
-                const svgBuffer = fs.readFileSync(logoPath);
-                logoBuffer = await svg2png(svgBuffer, { width: logoSize, height: logoSize });
-            } else {
-                logoBuffer = fs.readFileSync(logoPath);
+        for (let row = 0; row < moduleCount; row++) {
+            for (let col = 0; col < moduleCount; col++) {
+                const isDark = qr.modules.get(row, col);
+                // Сдвигаем координаты на margin
+                const x = col * cellSize + margin;
+                const y = row * cellSize + margin;
+                
+                // Вычисляем расстояние от центра до текущего модуля
+                const dx = (col - centerX) * cellSize;
+                const dy = (row - centerY) * cellSize;
+                const distance = Math.sqrt(dx * dx + dy * dy);
+                
+                // Если модуль находится внутри круга для логотипа, делаем его белым
+                if (distance < whiteCircleRadius) {
+                    svgString += renderModule(x, y, false, '#ffffff');
+                } else {
+                    svgString += renderModule(x, y, false, isDark ? '#000000' : '#ffffff');
+                }
             }
-
-            // Накладываем логотип в центр QR-кода с высоким качеством
-            await sharp(qrCodePath)
-                .composite([
-                    {
-                        input: logoBuffer,
-                        top: Math.floor((qrSize - logoSize) / 2),
-                        left: Math.floor((qrSize - logoSize) / 2)
-                    }
-                ])
-                .png({ 
-                    quality: 100, 
-                    compressionLevel: 0,
-                    adaptiveFiltering: false,
-                    force: true
-                })
-                .toFile(qrFinalPath);
-
-            // Удаляем промежуточный файл
-            fs.unlinkSync(qrCodePath);
-            return qrFinalPath;
-        } catch (error) {
-            console.error('Error adding logo to QR code:', error);
-            return qrCodePath; // fallback: возвращаем обычный QR
         }
-    }
+        svgString += '</svg>';
 
-    return qrCodePath;
+        // Конвертируем SVG в PNG с высоким качеством
+        const svgBuffer = Buffer.from(svgString);
+        const pngBuffer = await sharp(svgBuffer)
+            .png({ 
+                quality: 100, 
+                compressionLevel: 0,
+                adaptiveFiltering: false,
+                force: true
+            })
+            .toBuffer();
+        fs.writeFileSync(qrCodePath, pngBuffer);
+
+        // Если есть логотип, накладываем его
+        if (logoPath) {
+            try {
+                let logoBuffer: Buffer;
+                if (logoPath.endsWith('.svg')) {
+                    const svgBuffer = fs.readFileSync(logoPath);
+                    logoBuffer = await svg2png(svgBuffer, { width: logoSize, height: logoSize });
+                } else {
+                    logoBuffer = fs.readFileSync(logoPath);
+                }
+
+                // Накладываем логотип в центр QR-кода с высоким качеством
+                await sharp(qrCodePath)
+                    .composite([
+                        {
+                            input: logoBuffer,
+                            top: Math.floor((qrSize - logoSize) / 2),
+                            left: Math.floor((qrSize - logoSize) / 2)
+                        }
+                    ])
+                    .png({ 
+                        quality: 100, 
+                        compressionLevel: 0,
+                        adaptiveFiltering: false,
+                        force: true
+                    })
+                    .toFile(qrFinalPath);
+
+                // Удаляем промежуточный файл
+                fs.unlinkSync(qrCodePath);
+                return qrFinalPath;
+            } catch (error) {
+                console.error('Error adding logo to QR code:', error);
+                return qrCodePath; // fallback: возвращаем обычный QR
+            }
+        }
+
+        return qrCodePath;
+    } catch (error) {
+        console.error('Error generating QR code:', error);
+        throw new Error('Failed to generate QR code');
+    }
 }
 
 // Инициализация бота
@@ -243,7 +257,6 @@ async function setupCommands() {
             { command: 'terms', description: '📋 Условия использования' },
             { command: 'cancel', description: '❌ Отменить текущую операцию' }
         ]);
-        console.log('Menu commands set successfully');
     } catch (error) {
         console.error('Error setting menu commands:', error);
     }
@@ -260,17 +273,6 @@ setInterval(cleanupTempFolder, 6 * 60 * 60 * 1000);
 // Обработка команды /start
 bot.command('start', async (ctx) => {
     try {
-        // Логируем все сообщения в админ-чат
-        const adminChatId = process.env.ADMIN_CHAT_ID;
-        if (adminChatId && ctx.chat.id.toString() === adminChatId) {
-            console.log('\n🔔 Сообщение в админ-чате:');
-            console.log(`👤 User ID: ${ctx.from.id}`);
-            console.log(`👤 Username: @${ctx.from.username || 'unknown'}`);
-            console.log(`👤 Name: ${ctx.from.first_name || ''} ${ctx.from.last_name || ''}`);
-            console.log(`💬 Message: ${ctx.message.text}`);
-            console.log(`🆔 Chat ID: ${ctx.chat.id}`);
-            console.log(`📅 Time: ${new Date().toLocaleString('ru-RU')}\n`);
-        }
 
         // Создаем или получаем пользователя в БД
         const user = await database.getOrCreateUser(
@@ -322,30 +324,40 @@ bot.command('start', async (ctx) => {
 
 // Обработка команды /create
 bot.command('create', async (ctx) => {
-    const userId = ctx.from.id;
-    userStates.set(userId, { awaitingChoice: false, awaitingLogo: false, awaitingUrl: false, awaitingQuality: false, awaitingRenderSettings: true, awaitingSupportMessage: false });
+    try {
+        const userId = ctx.from.id;
+        userStates.set(userId, { awaitingChoice: false, awaitingLogo: false, awaitingUrl: false, awaitingQuality: false, awaitingRenderSettings: true, awaitingSupportMessage: false });
 
-    await ctx.reply(
-        'Выбери стиль модулей QR-кода:',
-        Markup.keyboard([
-            ['Квадраты', 'Скругленные'],
-            ['Круглые'],
-            ['🔙 Отменить']
-        ]).resize()
-    );
+        await ctx.reply(
+            'Выбери стиль модулей QR-кода:',
+            Markup.keyboard([
+                ['Квадраты', 'Скругленные'],
+                ['Круглые'],
+                ['🔙 Отменить']
+            ]).resize()
+        );
+    } catch (error) {
+        console.error('Error in /create command:', error);
+        await ctx.reply('Произошла ошибка. Попробуйте еще раз.');
+    }
 });
 
 // Обработка команды /cancel
 bot.command('cancel', async (ctx) => {
-    const userId = ctx.from.id;
-    userStates.delete(userId);
+    try {
+        const userId = ctx.from.id;
+        userStates.delete(userId);
 
-    await ctx.reply(
-        '✅ Операция отменена.',
-        Markup.keyboard([
-            ['⚡ Создать QR-код']
-        ]).resize()
-    );
+        await ctx.reply(
+            '✅ Операция отменена.',
+            Markup.keyboard([
+                ['⚡ Создать QR-код']
+            ]).resize()
+        );
+    } catch (error) {
+        console.error('Error in /cancel command:', error);
+        await ctx.reply('Произошла ошибка. Попробуйте еще раз.');
+    }
 });
 
 // Обработка команды /balance
@@ -558,7 +570,6 @@ bot.on('successful_payment', async (ctx) => {
         const totalAmount = ctx.message.successful_payment.total_amount;
         const payload = ctx.message.successful_payment.invoice_payload;
         
-        console.log(`Payment successful: ${paymentId}, amount: ${totalAmount} XTR, payload: ${payload}`);
         
         // Парсим payload для определения продукта
         const payloadParts = payload.split('_');
@@ -727,256 +738,311 @@ bot.command('terms', async (ctx) => {
 
 // Обработка нажатия кнопки "Создать QR-код"
 bot.hears('⚡ Создать QR-код', async (ctx) => {
-    const userId = ctx.from.id;
-    userStates.set(userId, { awaitingChoice: false, awaitingLogo: false, awaitingUrl: false, awaitingQuality: false, awaitingRenderSettings: true, awaitingSupportMessage: false });
+    try {
+        const userId = ctx.from.id;
+        userStates.set(userId, { awaitingChoice: false, awaitingLogo: false, awaitingUrl: false, awaitingQuality: false, awaitingRenderSettings: true, awaitingSupportMessage: false });
 
-    await ctx.reply(
-        'Выбери стиль модулей QR-кода:',
-        Markup.keyboard([
-            ['Квадраты', 'Скругленные'],
-            ['Круглые'],
-            ['🔙 Отменить']
-        ]).resize()
-    );
+        await ctx.reply(
+            'Выбери стиль модулей QR-кода:',
+            Markup.keyboard([
+                ['Квадраты', 'Скругленные'],
+                ['Круглые'],
+                ['🔙 Отменить']
+            ]).resize()
+        );
+    } catch (error) {
+        console.error('Error in create QR button handler:', error);
+        await ctx.reply('Произошла ошибка. Попробуйте еще раз.');
+    }
 });
 
 // Обработка выбора стиля рендеринга
 bot.hears('Квадраты', async (ctx) => {
-    const userId = ctx.from.id;
-    const state = userStates.get(userId);
-    
-    if (state?.awaitingRenderSettings) {
-        state.renderSettings = renderSettingsPresets['Квадраты'];
-        state.awaitingRenderSettings = false;
-        state.awaitingQuality = true;
-        userStates.set(userId, state);
+    try {
+        const userId = ctx.from.id;
+        const state = userStates.get(userId);
+        
+        if (state?.awaitingRenderSettings) {
+            state.renderSettings = renderSettingsPresets['Квадраты'];
+            state.awaitingRenderSettings = false;
+            state.awaitingQuality = true;
+            userStates.set(userId, state);
 
-        await ctx.reply(
-            'Выбери качество QR-кода:',
-            Markup.keyboard([
-                ['📱 Стандартное (400px)', '🖥️ Высокое (800px)'],
-                ['🎨 Ультра (1600px)'],
-                ['🔙 Отменить']
-            ]).resize()
-        );
+            await ctx.reply(
+                'Выбери качество QR-кода:',
+                Markup.keyboard([
+                    ['📱 Стандартное (400px)', '🖥️ Высокое (800px)'],
+                    ['🎨 Ультра (1600px)'],
+                    ['🔙 Отменить']
+                ]).resize()
+            );
+        }
+    } catch (error) {
+        console.error('Error in Квадраты handler:', error);
+        await ctx.reply('Произошла ошибка. Попробуйте еще раз.');
     }
 });
 
 bot.hears('Скругленные', async (ctx) => {
-    const userId = ctx.from.id;
-    const state = userStates.get(userId);
-    
-    if (state?.awaitingRenderSettings) {
-        state.renderSettings = renderSettingsPresets['Скругленные'];
-        state.awaitingRenderSettings = false;
-        state.awaitingQuality = true;
-        userStates.set(userId, state);
+    try {
+        const userId = ctx.from.id;
+        const state = userStates.get(userId);
+        
+        if (state?.awaitingRenderSettings) {
+            state.renderSettings = renderSettingsPresets['Скругленные'];
+            state.awaitingRenderSettings = false;
+            state.awaitingQuality = true;
+            userStates.set(userId, state);
 
-        await ctx.reply(
-            'Выбери качество QR-кода:',
-            Markup.keyboard([
-                ['📱 Стандартное (400px)', '🖥️ Высокое (800px)'],
-                ['🎨 Ультра (1600px)'],
-                ['🔙 Отменить']
-            ]).resize()
-        );
+            await ctx.reply(
+                'Выбери качество QR-кода:',
+                Markup.keyboard([
+                    ['📱 Стандартное (400px)', '🖥️ Высокое (800px)'],
+                    ['🎨 Ультра (1600px)'],
+                    ['🔙 Отменить']
+                ]).resize()
+            );
+        }
+    } catch (error) {
+        console.error('Error in Скругленные handler:', error);
+        await ctx.reply('Произошла ошибка. Попробуйте еще раз.');
     }
 });
 
 bot.hears('Круглые', async (ctx) => {
-    const userId = ctx.from.id;
-    const state = userStates.get(userId);
-    
-    if (state?.awaitingRenderSettings) {
-        state.renderSettings = renderSettingsPresets['Круглые'];
-        state.awaitingRenderSettings = false;
-        state.awaitingQuality = true;
-        userStates.set(userId, state);
+    try {
+        const userId = ctx.from.id;
+        const state = userStates.get(userId);
+        
+        if (state?.awaitingRenderSettings) {
+            state.renderSettings = renderSettingsPresets['Круглые'];
+            state.awaitingRenderSettings = false;
+            state.awaitingQuality = true;
+            userStates.set(userId, state);
 
-        await ctx.reply(
-            'Выбери качество QR-кода:',
-            Markup.keyboard([
-                ['📱 Стандартное (400px)', '🖥️ Высокое (800px)'],
-                ['🎨 Ультра (1600px)'],
-                ['🔙 Отменить']
-            ]).resize()
-        );
+            await ctx.reply(
+                'Выбери качество QR-кода:',
+                Markup.keyboard([
+                    ['📱 Стандартное (400px)', '🖥️ Высокое (800px)'],
+                    ['🎨 Ультра (1600px)'],
+                    ['🔙 Отменить']
+                ]).resize()
+            );
+        }
+    } catch (error) {
+        console.error('Error in Круглые handler:', error);
+        await ctx.reply('Произошла ошибка. Попробуйте еще раз.');
     }
 });
 
 // Обработка выбора качества
 bot.hears('📱 Стандартное (400px)', async (ctx) => {
-    const userId = ctx.from.id;
-    const state = userStates.get(userId);
-    
-    if (state?.awaitingQuality) {
-        state.awaitingQuality = false;
-        state.awaitingChoice = true;
-        state.quality = 'standard';
-        userStates.set(userId, state);
+    try {
+        const userId = ctx.from.id;
+        const state = userStates.get(userId);
+        
+        if (state?.awaitingQuality) {
+            state.awaitingQuality = false;
+            state.awaitingChoice = true;
+            state.quality = 'standard';
+            userStates.set(userId, state);
 
-        await ctx.reply(
-            'Выбери тип QR-кода:',
-            Markup.keyboard([
-                ['✅ С логотипом'],
-                ['❌ Без логотипа'],
-                ['🔙 Отменить']
-            ]).resize()
-        );
+            await ctx.reply(
+                'Выбери тип QR-кода:',
+                Markup.keyboard([
+                    ['✅ С логотипом'],
+                    ['❌ Без логотипа'],
+                    ['🔙 Отменить']
+                ]).resize()
+            );
+        }
+    } catch (error) {
+        console.error('Error in стандартное качество handler:', error);
+        await ctx.reply('Произошла ошибка. Попробуйте еще раз.');
     }
 });
 
 bot.hears('🖥️ Высокое (800px)', async (ctx) => {
-    const userId = ctx.from.id;
-    const state = userStates.get(userId);
-    
-    if (state?.awaitingQuality) {
-        // Проверяем доступность High качества
-        const user = await database.getUser(userId);
+    try {
+        const userId = ctx.from.id;
+        const state = userStates.get(userId);
         
-        if (!user || user.premiumHighAvailable <= 0) {
+        if (state?.awaitingQuality) {
+            // Проверяем доступность High качества
+            const user = await database.getUser(userId);
+            
+            if (!user || user.premiumHighAvailable <= 0) {
+                await ctx.reply(
+                    `❌ У вас нет доступных QR-кодов высокого качества (800x800px)\n\n` +
+                    `Ваш баланс: ${user?.premiumHighAvailable || 0} шт.\n\n` +
+                    `💳 Чтобы получить доступ, используйте команду /pay\n\n` +
+                    `📱 Или выберите бесплатное качество (400x400px)`,
+                    Markup.keyboard([
+                        ['📱 Стандартное (400px)', '🎨 Ультра (1600px)'],
+                        ['🔙 Отменить']
+                    ]).resize()
+                );
+                return;
+            }
+            
+            state.awaitingQuality = false;
+            state.awaitingChoice = true;
+            state.quality = 'high';
+            userStates.set(userId, state);
+
             await ctx.reply(
-                `❌ У вас нет доступных QR-кодов высокого качества (800x800px)\n\n` +
-                `Ваш баланс: ${user?.premiumHighAvailable || 0} шт.\n\n` +
-                `💳 Чтобы получить доступ, используйте команду /pay\n\n` +
-                `📱 Или выберите бесплатное качество (400x400px)`,
+                `✅ Есть доступ! (Осталось: ${user.premiumHighAvailable} шт.)\n\nВыбери тип QR-кода:`,
                 Markup.keyboard([
-                    ['📱 Стандартное (400px)', '🎨 Ультра (1600px)'],
+                    ['✅ С логотипом'],
+                    ['❌ Без логотипа'],
                     ['🔙 Отменить']
                 ]).resize()
             );
-            return;
         }
-        
-        state.awaitingQuality = false;
-        state.awaitingChoice = true;
-        state.quality = 'high';
-        userStates.set(userId, state);
-
-        await ctx.reply(
-            `✅ Есть доступ! (Осталось: ${user.premiumHighAvailable} шт.)\n\nВыбери тип QR-кода:`,
-            Markup.keyboard([
-                ['✅ С логотипом'],
-                ['❌ Без логотипа'],
-                ['🔙 Отменить']
-            ]).resize()
-        );
+    } catch (error) {
+        console.error('Error in высокое качество handler:', error);
+        await ctx.reply('Произошла ошибка. Попробуйте еще раз.');
     }
 });
 
 bot.hears('🎨 Ультра (1600px)', async (ctx) => {
-    const userId = ctx.from.id;
-    const state = userStates.get(userId);
-    
-    if (state?.awaitingQuality) {
-        // Проверяем доступность Ultra качества
-        const user = await database.getUser(userId);
+    try {
+        const userId = ctx.from.id;
+        const state = userStates.get(userId);
         
-        if (!user || user.premiumUltraAvailable <= 0) {
+        if (state?.awaitingQuality) {
+            // Проверяем доступность Ultra качества
+            const user = await database.getUser(userId);
+            
+            if (!user || user.premiumUltraAvailable <= 0) {
+                await ctx.reply(
+                    `❌ У вас нет доступных QR-кодов ультра качества (1600x1600px)\n\n` +
+                    `Ваш баланс: ${user?.premiumUltraAvailable || 0} шт.\n\n` +
+                    `💳 Чтобы получить доступ, используйте команду /pay\n\n` +
+                    `📱 Или выберите другое качество`,
+                    Markup.keyboard([
+                        ['📱 Стандартное (400px)', '🖥️ Высокое (800px)'],
+                        ['🔙 Отменить']
+                    ]).resize()
+                );
+                return;
+            }
+            
+            state.awaitingQuality = false;
+            state.awaitingChoice = true;
+            state.quality = 'ultra';
+            userStates.set(userId, state);
+
             await ctx.reply(
-                `❌ У вас нет доступных QR-кодов ультра качества (1600x1600px)\n\n` +
-                `Ваш баланс: ${user?.premiumUltraAvailable || 0} шт.\n\n` +
-                `💳 Чтобы получить доступ, используйте команду /pay\n\n` +
-                `📱 Или выберите другое качество`,
+                `✅ Есть доступ! (Осталось: ${user.premiumUltraAvailable} шт.)\n\nВыбери тип QR-кода:`,
                 Markup.keyboard([
-                    ['📱 Стандартное (400px)', '🖥️ Высокое (800px)'],
+                    ['✅ С логотипом'],
+                    ['❌ Без логотипа'],
                     ['🔙 Отменить']
                 ]).resize()
             );
-            return;
         }
-        
-        state.awaitingQuality = false;
-        state.awaitingChoice = true;
-        state.quality = 'ultra';
-        userStates.set(userId, state);
-
-        await ctx.reply(
-            `✅ Есть доступ! (Осталось: ${user.premiumUltraAvailable} шт.)\n\nВыбери тип QR-кода:`,
-            Markup.keyboard([
-                ['✅ С логотипом'],
-                ['❌ Без логотипа'],
-                ['🔙 Отменить']
-            ]).resize()
-        );
+    } catch (error) {
+        console.error('Error in ультра качество handler:', error);
+        await ctx.reply('Произошла ошибка. Попробуйте еще раз.');
     }
 });
 
 // Обработка нажатия кнопки "С логотипом"
 bot.hears('✅ С логотипом', async (ctx) => {
-    const userId = ctx.from.id;
-    const state = userStates.get(userId);
-    
-    if (state?.awaitingChoice) {
-        state.awaitingChoice = false;
-        state.awaitingLogo = true;
-        state.awaitingUrl = false;
-        userStates.set(userId, state);
+    try {
+        const userId = ctx.from.id;
+        const state = userStates.get(userId);
+        
+        if (state?.awaitingChoice) {
+            state.awaitingChoice = false;
+            state.awaitingLogo = true;
+            state.awaitingUrl = false;
+            userStates.set(userId, state);
 
-        await ctx.reply(
-            'Отправь логотип в формате SVG.',
-            Markup.keyboard([
-                ['🔙 Отменить']
-            ]).resize()
-        );
+            await ctx.reply(
+                'Отправь логотип в формате SVG.',
+                Markup.keyboard([
+                    ['🔙 Отменить']
+                ]).resize()
+            );
+        }
+    } catch (error) {
+        console.error('Error in С логотипом handler:', error);
+        await ctx.reply('Произошла ошибка. Попробуйте еще раз.');
     }
 });
 
 // Обработка нажатия кнопки "Без логотипа"
 bot.hears('❌ Без логотипа', async (ctx) => {
-    const userId = ctx.from.id;
-    const state = userStates.get(userId);
-    
-    if (state?.awaitingChoice) {
-        state.awaitingChoice = false;
-        state.awaitingLogo = false;
-        state.awaitingUrl = true;
-        userStates.set(userId, state);
-
-        const qualityText = state.quality === 'ultra' ? 'ультра' : 
-                           state.quality === 'high' ? 'высоком' : 'стандартном';
+    try {
+        const userId = ctx.from.id;
+        const state = userStates.get(userId);
         
-        await ctx.reply(
-            `Пришли ссылку или текст для QR-кода в ${qualityText} качестве.`,
-            Markup.keyboard([
-                ['🔙 Отменить']
-            ]).resize()
-        );
+        if (state?.awaitingChoice) {
+            state.awaitingChoice = false;
+            state.awaitingLogo = false;
+            state.awaitingUrl = true;
+            userStates.set(userId, state);
+
+            const qualityText = state.quality === 'ultra' ? 'ультра' : 
+                               state.quality === 'high' ? 'высоком' : 'стандартном';
+            
+            await ctx.reply(
+                `Пришли ссылку или текст для QR-кода в ${qualityText} качестве.`,
+                Markup.keyboard([
+                    ['🔙 Отменить']
+                ]).resize()
+            );
+        }
+    } catch (error) {
+        console.error('Error in Без логотипа handler:', error);
+        await ctx.reply('Произошла ошибка. Попробуйте еще раз.');
     }
 });
 
 // Обработка кнопки "Обратиться в техподдержку"
 bot.hears('📝 Обратиться в техподдержку', async (ctx) => {
-    const userId = ctx.from.id;
-    userStates.set(userId, { 
-        awaitingChoice: false, 
-        awaitingLogo: false, 
-        awaitingUrl: false, 
-        awaitingQuality: false, 
-        awaitingRenderSettings: false,
-        awaitingSupportMessage: true 
-    });
+    try {
+        const userId = ctx.from.id;
+        userStates.set(userId, { 
+            awaitingChoice: false, 
+            awaitingLogo: false, 
+            awaitingUrl: false, 
+            awaitingQuality: false, 
+            awaitingRenderSettings: false,
+            awaitingSupportMessage: true 
+        });
 
-    await ctx.reply(
-        '✍️ Напишите ваш вопрос или сообщение для техподдержки.\n\n' +
-        'Мы ответим вам в ближайшее время.',
-        Markup.keyboard([
-            ['🔙 Отменить']
-        ]).resize()
-    );
+        await ctx.reply(
+            '✍️ Напишите ваш вопрос или сообщение для техподдержки.\n\n' +
+            'Мы ответим вам в ближайшее время.',
+            Markup.keyboard([
+                ['🔙 Отменить']
+            ]).resize()
+        );
+    } catch (error) {
+        console.error('Error in техподдержка handler:', error);
+        await ctx.reply('Произошла ошибка. Попробуйте еще раз.');
+    }
 });
 
 // Обработка нажатия кнопки "Отменить"
 bot.hears('🔙 Отменить', async (ctx) => {
-    const userId = ctx.from.id;
-    userStates.delete(userId);
+    try {
+        const userId = ctx.from.id;
+        userStates.delete(userId);
 
-    await ctx.reply(
-        '✅ Операция отменена.',
-        Markup.keyboard([
-            ['⚡ Создать QR-код']
-        ]).resize()
-    );
+        await ctx.reply(
+            '✅ Операция отменена.',
+            Markup.keyboard([
+                ['⚡ Создать QR-код']
+            ]).resize()
+        );
+    } catch (error) {
+        console.error('Error in Отменить handler:', error);
+        await ctx.reply('Произошла ошибка. Попробуйте еще раз.');
+    }
 });
 
 // Обработка получения фото
@@ -1058,34 +1124,11 @@ bot.on(message('text'), async (ctx) => {
     const state = userStates.get(userId);
     const text = ctx.message.text;
 
-    // Логируем ВСЕ сообщения для отладки
-    console.log('\n📨 Получено сообщение:');
-    console.log(`👤 User ID: ${ctx.from.id}`);
-    console.log(`👤 Username: @${ctx.from.username || 'unknown'}`);
-    console.log(`👤 Name: ${ctx.from.first_name || ''} ${ctx.from.last_name || ''}`);
-    console.log(`💬 Message: ${text}`);
-    console.log(`🆔 Chat ID: ${ctx.chat.id}`);
-    console.log(`📅 Time: ${new Date().toLocaleString('ru-RU')}`);
-    console.log(`🔧 ADMIN_CHAT_ID: ${process.env.ADMIN_CHAT_ID || 'НЕ УСТАНОВЛЕН'}\n`);
-
-    // Логируем все сообщения в админ-чат
-    const adminChatId = process.env.ADMIN_CHAT_ID;
-    if (adminChatId && ctx.chat.id.toString() === adminChatId) {
-        console.log('✅ ЭТО АДМИН-ЧАТ!');
-    }
 
     // Обработка сообщений в техподдержку
     if (state?.awaitingSupportMessage) {
         const adminChatId = process.env.ADMIN_CHAT_ID ? process.env.ADMIN_CHAT_ID : null;
         
-        // Логируем информацию о пользователе и чате
-        console.log('\n📩 Новое сообщение в техподдержку:');
-        console.log(`👤 User ID: ${userId}`);
-        console.log(`👤 Username: @${ctx.from.username || 'unknown'}`);
-        console.log(`👤 Name: ${ctx.from.first_name || ''} ${ctx.from.last_name || ''}`);
-        console.log(`💬 Message: ${text}`);
-        console.log(`🆔 Chat ID: ${ctx.chat.id}`);
-        console.log(`📅 Time: ${new Date().toLocaleString('ru-RU')}\n`);
         
         if (adminChatId) {
             try {

@@ -157,7 +157,6 @@ class Database {
                 'INSERT INTO users (tgUserId, username, firstName, lastName, freeStandardAvailable, premiumHighAvailable, premiumUltraAvailable, totalSpentStars) VALUES (?, ?, ?, ?, 5, 0, 0, 0)',
                 [userId, username, firstName, lastName]
             );
-            console.log(`✅ Created new user: ${userId}`);
             
             // Получаем созданного пользователя
             user = await this.get('SELECT * FROM users WHERE tgUserId = ?', [userId]) as User;
@@ -273,7 +272,6 @@ class Database {
                 [payment.amount, payment.tgUserId]
             );
 
-            console.log(`✅ Payment saved: ${payment.telegramPaymentChargeId}`);
         } catch (error) {
             console.error('Error saving payment:', error);
             throw error;
